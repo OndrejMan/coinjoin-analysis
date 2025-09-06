@@ -831,6 +831,7 @@ def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, expe
     ax.hist(data_ctips_small, bins=100, color='red', edgecolor='black', alpha=0.5, label=label)
     ax.set_xlabel('fee (sats)')
     ax.set_ylabel('# occurences')
+    ax.set_xlim(0, 9000)
     title = 'Distribution of mining and hidden coordination tips' if LONG_LEGEND else 'Mining & hidden coord. tips'
     ax.set_title(title)
     ax.legend()

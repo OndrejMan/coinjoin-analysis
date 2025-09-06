@@ -1,6 +1,5 @@
-import json
 import os
-import random
+import shutil
 from collections import defaultdict
 from itertools import groupby
 
@@ -8,7 +7,8 @@ import numpy as np
 import plotly.graph_objects as go
 from matplotlib import pyplot as plt
 from orjson import orjson
-import cj_analysis as als
+
+import cj_process.cj_analysis as als
 SATS_IN_BTC = 100000000
 
 
@@ -60,7 +60,7 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
         #flows = flows_all
         flows = flows_only_inter
 
-    print(f'Inter-coordinators flows ({'counts' if counts else 'values'}): {flows}')
+    print(f"Inter-coordinators flows ({'counts' if counts else 'values'}): {flows}")
     #als.save_json_to_file_pretty(f'{output_file_template}.json', flows)
 
     sources, targets, values = zip(
@@ -153,28 +153,36 @@ def visualize_coord_flows(base_path: str):
     build_intercoord_flows_sankey_good(base_path, entities_to_process, data, False, "2025-01-01 00:00:00.000")
 
 
-def gant_coordinators_plotly():
+def gant_coordinators_plotly(base_path: str):
     import plotly.graph_objects as go
     import pandas as pd
     import numpy as np
     from datetime import datetime, timedelta
     from math import ceil
 
-    # --- Define tasks based on your table ---
+    # Perform selective renaming of files for proper visualization
+    to_rename = [('wasabi1_zksnacks_freshliquidity_values_norm.json', 'wasabi1_Wasabi 1.x (zksnacks)_freshliquidity_values_norm.json'),
+                 ('wasabi2_zksnacks_freshliquidity_values_norm.json', 'wasabi2_Wasabi 2.x (zksnacks)_freshliquidity_values_norm.json')]
+    for item in to_rename:
+        shutil.copy2(os.path.join(base_path, item[0]), os.path.join(base_path, item[1]))
+
     base_tasks = [
         #dict(Task="Whirlpool all (Sam.)", Start="2019-04-17", Finish="2024-04-24"),
-        dict(Task="Wasabi 1.x (zksnacks)", Start="2018-07-19", Finish="2024-06-01", y_pos=0),
+        dict(Task="Wasabi 1.x (zksnacks)", Start="2018-07-19", Finish="2023-05-19", y_pos=0),
         dict(Task="Wasabi 2.x (zksnacks)", Start="2022-06-18", Finish="2024-06-02", y_pos=1),
-        dict(Task="Whirlpool 5M", Start="2019-04-17", Finish="2024-04-24", y_pos=2),
-        dict(Task="Whirlpool 1M", Start="2019-05-23", Finish="2024-04-24", y_pos=3),
-        dict(Task="Whirlpool 50M", Start="2019-08-02", Finish="2024-04-24", y_pos=4),
-        dict(Task="Whirlpool 100k", Start="2021-03-05", Finish="2024-04-24", y_pos=5),
+        dict(Task="Samourai Whirlpool 5M", Start="2019-04-17", Finish="2024-04-24", y_pos=2),
+        dict(Task="Samourai Whirlpool 1M", Start="2019-05-23", Finish="2024-04-24", y_pos=3),
+        dict(Task="Samourai Whirlpool 50M", Start="2019-08-02", Finish="2024-04-24", y_pos=4),
+        dict(Task="Samourai Whirlpool 100k", Start="2021-03-05", Finish="2024-04-24", y_pos=5),
         dict(Task="Wasabi 2.x (kruw.io)", Start="2024-05-31", Finish=datetime.today().strftime("%Y-%m-%d"), y_pos=3),
         dict(Task="Wasabi 2.x (gingerwallet)", Start="2024-05-21", Finish=datetime.today().strftime("%Y-%m-%d"), y_pos=2),
         #dict(Task="Wasabi 2.x (wasabicoordinator)", Start="2024-06-11", Finish="2024-08-11", y_pos=4),
         dict(Task="Wasabi 2.x (opencoordinator)", Start="2024-07-08", Finish=datetime.today().strftime("%Y-%m-%d"), y_pos=4),
-        dict(Task="Wasabi 2.x (others)", Start="2024-06-13", Finish="2024-09-14", y_pos=5),
+        #dict(Task="Wasabi 2.x (others)", Start="2024-05-03", Finish="2024-11-11", y_pos=5),
+        #dict(Task="Wasabi 2.x (small coords.)", Start="2024-05-03", Finish=datetime.today().strftime("%Y-%m-%d"), y_pos=5),
         #        dict(Task="Wasabi 2.x (wasabist)", Start="2024-07-23", Finish="2024-08-03", y_pos=9),
+        dict(Task="Ashigaru 2.5M", Start="2025-05-31", Finish=datetime.today().strftime("%Y-%m-%d"), y_pos=5),
+        dict(Task="Ashigaru 25M", Start="2025-06-06", Finish=datetime.today().strftime("%Y-%m-%d"), y_pos=6),
     ]
 
     df = pd.DataFrame(base_tasks)
@@ -208,7 +216,7 @@ def gant_coordinators_plotly():
             y=row.y_pos,
             text=row.Task,
             showarrow=False,
-            font=dict(color="black", size=10),
+            font=dict(color="black", size=14, weight="bold"),
             xanchor="center",
             yanchor="middle"
         )
@@ -218,7 +226,8 @@ def gant_coordinators_plotly():
     group_colormaps = {
         "Whirlpool": colormaps.get_cmap("Blues"),
         "Wasabi 1.x": colormaps.get_cmap("Reds"),
-        "Wasabi 2.x": colormaps.get_cmap("Greens")
+        "Wasabi 2.x": colormaps.get_cmap("Greens"),
+        "Ashigaru": colormaps.get_cmap("Blues")
     }
 
     for task_idx, row in enumerate(df.itertuples()):
@@ -229,6 +238,8 @@ def gant_coordinators_plotly():
         # --- Determine task group and colormap ---
         if "Whirlpool" in row.Task:
             cmap = group_colormaps["Whirlpool"]
+        elif "Ashigaru" in row.Task:
+            cmap = group_colormaps["Ashigaru"]
         elif "Wasabi 1.x" in row.Task:
             cmap = group_colormaps["Wasabi 1.x"]
         elif "Wasabi 2.x" in row.Task:
@@ -243,11 +254,11 @@ def gant_coordinators_plotly():
         coords = [('wasabi2', 'kruw'), ('wasabi2', 'Wasabi 2.x (zksnacks)'), ('wasabi2', 'gingerwallet'),
                   ('wasabi2', 'opencoordinator'), ('wasabi2', 'wasabicoordinator'),
                   ('whirlpool', '100k'), ('whirlpool', '1M'), ('whirlpool', '5M'), ('whirlpool', '50M'),
-                  ('wasabi1', 'Wasabi 1.x (zksnacks)')]
+                  ('wasabi1', 'Wasabi 1.x (zksnacks)'), ('whirlpool_ashigaru', '2_5M'), ('whirlpool_ashigaru', '25M')]
         for coord in coords:
             # Load real values
             if coord[1] in row.Task:
-                liquidity = als.load_json_from_file(f'{coord[0]}_{coord[1]}_freshliquidity_values_norm.json')['months_liquidity'][1:]
+                liquidity = als.load_json_from_file(os.path.join(base_path, f'{coord[0]}_{coord[1]}_freshliquidity_values_norm.json'))['months_liquidity'][1:]
                 real_values = np.array([key for key, _ in groupby(liquidity)])
                 print(f'Collapsed length: {len(real_values)}')
                 if len(real_values) != len(values):
@@ -319,7 +330,8 @@ def gant_coordinators_plotly():
         ticktext=tick_labels,
         showgrid=True,
         gridcolor='lightgray',
-        title=None
+        title=None,
+        tickfont=dict(color="black", size=18, family="Arial Bold")
     )
     # --- Adaptive height to fit on one screen ---
     max_chart_height = 600
@@ -337,8 +349,8 @@ def gant_coordinators_plotly():
 
     # --- Output ---
     fig.write_html("gantt_monthly_ticks_trend_lines.html", auto_open=True)
-    #fig.write_image("gantt_monthly_ticks_trend_lines.pdf")
-    #fig.write_image("gantt_monthly_ticks_trend_lines.svg")
+    fig.write_image("gantt_monthly_ticks_trend_lines.pdf")
+    fig.write_image("gantt_monthly_ticks_trend_lines.svg")
     #plt.savefig(f'gantt_monthly_ticks_trend_lines.pdf', dpi=300)
 
 
@@ -366,11 +378,11 @@ def compute_reorder_stats(base_path: str):
 
 
 if __name__ == "__main__":
-    base_path = 'c:/!blockchains/CoinJoin/Dumplings_Stats_20250502/'
-    #base_path = '/home/xsvenda/btc/dumplings_temp/'
+    base_path = 'c:/!blockchains/CoinJoin/Dumplings_Stats_20250820/'
+    base_path = '/home/xsvenda/btc/dumplings_temp2/Scanner/'
 
     #compute_reorder_stats(base_path)
-    #gant_coordinators_plotly()
-    visualize_coord_flows(base_path)
+    gant_coordinators_plotly(base_path)
+    #visualize_coord_flows(base_path)
 
 
