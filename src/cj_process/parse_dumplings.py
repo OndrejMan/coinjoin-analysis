@@ -3665,12 +3665,11 @@ def main(argv=None):
         analyze_zksnacks_output_clusters('wasabi2', target_path)
 
     if op.ANALYSIS_WALLET_PREDICTION:
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_gingerwallet')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_opencoordinator')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_wasabicoordinator')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_kruw')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_zksnacks')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1')
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            for coord in cjc.WASABI2_COORD_NAMES_ALL:
+                cjvis.estimate_wallet_prediction_factor(target_path, f'wasabi2_{coord}')
+        if op.CJ_TYPE == CoinjoinType.WW1:
+            cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
 
 
     print('### SUMMARY #############################')

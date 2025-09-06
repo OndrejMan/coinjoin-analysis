@@ -10,6 +10,8 @@ from cj_process.cj_analysis import load_coinjoins_from_file
 from cj_process.file_check import check_coinjoin_files
 from cj_process.file_check import check_expected_files_in_folder
 
+from cj_process.cj_consts import WASABI2_COORD_NAMES_ALL
+
 TESTS = Path(__file__).resolve().parent.parent # …/repo/tests
 REPO_ROOT = TESTS.parent                       # …/repo
 DATA = REPO_ROOT / "data"                      # …/repo/data
@@ -140,11 +142,8 @@ def test_run_cj_process_ww2():
     # TODO: ASSERT 'txid_coord_discovered_renamed.json'
 
     # Add metadata for additional coordinators
-    coords_all = ["wasabi2_kruw", "wasabi2_gingerwallet", "wasabi2_opencoordinator", "wasabi2_wasabicoordinator",
-                  "wasabi2_coinjoin_nl", "wasabi2_wasabist", "wasabi2_dragonordnance", "wasabi2_mega", "wasabi2_btip",
-                  "wasabi2_strange_2025", "wasabi2_unknown_2024"]
-    for coord in coords_all:
-        target_dir = os.path.join(extract_dir, "Scanner", coord)
+    for coord in WASABI2_COORD_NAMES_ALL:
+        target_dir = os.path.join(extract_dir, "Scanner", f'wasabi2_{coord}')
         shutil.copy(os.path.join(DATA, "wasabi2", "fee_rates.json"), os.path.join(target_dir, "fee_rates.json"))
         shutil.copy(os.path.join(DATA, "wasabi2", "false_cjtxs.json"), os.path.join(target_dir, "false_cjtxs.json"))
 
