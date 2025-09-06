@@ -35,6 +35,12 @@ $BASE_PATH/btc/coinjoin-analysis/scripts/process_aw.sh
 $BASE_PATH/btc/coinjoin-analysis/scripts/process_ww1.sh
 
 #
+# Process Samourai Whirlpool 
+#
+$BASE_PATH/btc/coinjoin-analysis/scripts/process_sw.sh
+
+
+#
 # Process JoinMarket 
 # Note: Needs to come after Wasabi 1.0 and Wasabi 2.0 for false positives restoration 
 #
@@ -49,6 +55,7 @@ $BASE_PATH/btc/coinjoin-analysis/scripts/visualize_ww2.sh
 $BASE_PATH/btc/coinjoin-analysis/scripts/visualize_aw.sh
 $BASE_PATH/btc/coinjoin-analysis/scripts/visualize_jm.sh
 $BASE_PATH/btc/coinjoin-analysis/scripts/visualize_ww1.sh
+$BASE_PATH/btc/coinjoin-analysis/scripts/visualize_sw.sh
 
 
 
@@ -140,6 +147,15 @@ montage "${image_list[@]}" \
   -tile 3x \
   -strip -define png:compression-level=9 \
   "$DEST_DIR/Scanner/summary2_tiles_all_cummul_values_norm.png"
+
+
+# all wasabi2 pools
+image_list=()
+for pool in others kruw gingerwallet opencoordinator coinjoin_nl wasabicoordinator wasabist mega btip unknown_2024; do
+    image_list+=("$DEST_DIR/Scanner/wasabi2_$pool/wasabi2_${pool}_cummul_values_norm.png")
+done
+
+montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_tiles_ww2_cummul_values_norm.png
 
 
 #

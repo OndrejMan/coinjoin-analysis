@@ -19,5 +19,8 @@ python3 -m cj_process.parse_dumplings --cjtype ww2 --action plot_coinjoins --env
 # Another visualization graphs (older)
 python3 -m cj_process.parse_dumplings --cjtype ww2 --target-path $TMP_DIR/ --env_vars "VISUALIZE_ALL_COINJOINS_INTERVALS=True" | tee parse_dumplings.py.log
 
+# Visualization of wallets predictions in time
+python3 -m cj_process.parse_dumplings --cjtype ww2 --env_vars "ANALYSIS_WALLET_PREDICTION=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+
 
 
