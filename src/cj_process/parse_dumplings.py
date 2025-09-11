@@ -19,6 +19,7 @@ import pandas as pd
 import numpy as np
 from cj_process.cj_analysis import get_output_name_string, get_input_name_string
 from cj_process import cj_analysis as als
+from cj_process import cj_consts as cjc
 import argparse
 import gc
 import time
@@ -2348,9 +2349,7 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
     else:
         coords = []
         if mix_protocol == CoinjoinType.WW2:
-            coords = [('wasabi2', 'zksnacks'), ('wasabi2', 'others'), ('wasabi2', 'kruw'), ('wasabi2', 'gingerwallet'),
-                      ('wasabi2', 'opencoordinator'), ('wasabi2', 'coinjoin_nl'), ('wasabi2', 'wasabicoordinator'),
-                      ('wasabi2', 'mega'), ('wasabi2', 'btip'), ('wasabi2', 'unknown_2024')]
+            coords = [('wasabi2', coord_name) for coord_name in cjc.WASABI2_COORD_NAMES_ALL]
         if mix_protocol == CoinjoinType.WW1:
             coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
         if mix_protocol == CoinjoinType.JM:
