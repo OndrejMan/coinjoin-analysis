@@ -3367,6 +3367,8 @@ def main(argv=None):
                                                 op.SAVE_BASE_FILES_JSON, False)
 
             mix_ids_default = WHIRLPOOL_POOL_NAMES_ALL
+            # Remove general 'whirlpool' folder with all pools together - it is already extracted
+            mix_ids_default.remove('whirlpool')
             # Force MIX_IDS subset if required
             mix_ids = mix_ids_default if op.MIX_IDS == "" else op.MIX_IDS
             # Split and process Whirlpool-based on pools
