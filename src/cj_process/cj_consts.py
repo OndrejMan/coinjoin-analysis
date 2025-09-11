@@ -26,4 +26,4 @@ WASABI2_FUNDING_TXS['opencoordinator'] = {'start_date': '2025-05-02 21:43:13.000
 
 WASABI2_COORD_NAMES_ALL = ["kruw", "gingerwallet", "opencoordinator", "wasabicoordinator",
                   "coinjoin_nl", "wasabist", "dragonordnance", "mega", "btip",
-                  "strange_2025", "unknown_2024", "others"]
+                  "strange_2025", "unknown_2024", "others", "zksnacks"]
