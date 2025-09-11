@@ -508,6 +508,31 @@ def plot_whirlpool_coordinator_fees(mix_id: str, cjtxs_coordinator_fees: dict):
     plt.show()
 
 
+def plot_month_year_separators(new_month_indices, separators_to_plot, ax2):
+    # Plot lines as separators corresponding to months
+    for pos in new_month_indices:
+        if pos[0] in separators_to_plot:
+            PLOT_DAYS_MONTHS = False
+            if pos[0] == 'day' or pos[0] == 'month' and PLOT_DAYS_MONTHS:
+                ax2.axvline(x=pos[1], color='gray', linewidth=0.5, alpha=0.1, linestyle='--')
+            if pos[0] == 'year':
+                ax2.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.4, linestyle='--')
+    ax2.set_xticks([x[1] for x in new_month_indices])
+    labels = []
+    prev_year_offset = -10000
+    for x in new_month_indices:
+        if x[0] == 'year':
+            if x[1] - prev_year_offset > 1000:
+                labels.append(f'{x[2][0:4]}')
+                prev_year_offset = x[1]
+            else:
+                labels.append('')
+        else:
+            labels.append('')
+    ax2.set_xticklabels(labels, rotation=45, fontsize=6)
+
+
+
 def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str, sort_coinjoins_relative_order: bool,
                         analyze_values: bool = True, normalize_values: bool = True,
                         restrict_to_out_size = None, restrict_to_in_size = None,
@@ -598,7 +623,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             for i in range(1, len(dates)):
                 if dates[i].day != dates[i - 1].day:
                     new_day_indices.append(('day', i))
-            print(new_day_indices)
+            #print(new_day_indices)
             for pos in new_day_indices:
                 ax.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.2)
 
@@ -608,6 +633,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             else:
                 new_month_indices.append(('year', next_month_index, dir_name[0:7]))
             next_month_index += len(data["coinjoins"])  # Store index of start fo next month (right after last index of current month)
+            # TODO: if len(data["coinjoins"]) == 0, then month tick is plotted over previous one and is not visible
+            #    add some artificial space to improve visibility? Or add artificial empty coinjoin bar?
 
             # Detect transactions with no remixes on input/out or both
             no_remix = als.detect_no_inout_remix_txs(data["coinjoins"])
@@ -825,26 +852,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 ax3.tick_params(axis='y', colors='green')
 
             # Plot lines as separators corresponding to months
-            for pos in new_month_indices:
-                if pos[0] in separators_to_plot:
-                    PLOT_DAYS_MONTHS = False
-                    if pos[0] == 'day' or pos[0] == 'month' and PLOT_DAYS_MONTHS:
-                        ax2.axvline(x=pos[1], color='gray', linewidth=0.5, alpha=0.1, linestyle='--')
-                    if pos[0] == 'year':
-                        ax2.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.4, linestyle='--')
-            ax2.set_xticks([x[1] for x in new_month_indices])
-            labels = []
-            prev_year_offset = -10000
-            for x in new_month_indices:
-                if x[0] == 'year':
-                    if x[1] - prev_year_offset > 1000:
-                        labels.append(f'{x[2][0:4]}')
-                        prev_year_offset = x[1]
-                    else:
-                        labels.append('')
-                else:
-                    labels.append('')
-            ax2.set_xticklabels(labels, rotation=45, fontsize=6)
+            plot_month_year_separators(new_month_indices, separators_to_plot, ax2)
 
             # if ax:
             #     ax.legend(loc='center left')
@@ -909,6 +917,10 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
     all_data = als.load_coinjoins_from_file(target_load_path, None, True)
     sorted_cj_time = als.sort_coinjoins(all_data['coinjoins'], als.SORT_COINJOINS_BY_RELATIVE_ORDER)
 
+    if len(sorted_cj_time) < 2:
+        logging.warning(f'estimate_wallet_prediction_factor() - too little coinjoins available for {mix_id}, not continuing')
+        return []
+
     logging.debug(f'estimate_wallet_prediction_factor() going to estimate input factors for {mix_id}')
 
     num_all_inputs = np.array([len(all_data['coinjoins'][cj['txid']]['inputs']) for cj in sorted_cj_time])
@@ -924,6 +936,20 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
 
     ratios_list_every_cjtx = [num_all_inputs[offset] / (num_all_outputs[offset] / AVG_NUM_OUTPUTS) for offset in range(0, len(num_all_inputs))]  # Number of wallets in every
     ax.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
+
+    # Store index of coinjoins when it changes months/years
+    new_month_indices = []
+    next_month_index = 0
+    dates = sorted(
+        [precomp_datetime.strptime(all_data["coinjoins"][cjtx['txid']]['broadcast_time_virtual'], "%Y-%m-%d %H:%M:%S.%f") for cjtx in
+         sorted_cj_time])
+    for i in range(1, len(dates)):
+        if dates[i].month != dates[i - 1].month:
+            if dates[i].year == dates[i - 1].year:
+                new_month_indices.append(('month', next_month_index, f'{dates[i].year}-{dates[i].month:02}'))
+            else:
+                new_month_indices.append(('year', next_month_index, f'{dates[i].year}-{dates[i].month:02}'))
+        next_month_index = next_month_index + 1
 
     ratios_list = []
     WINDOW_LEN = 10
@@ -945,6 +971,9 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
              label=f'Average of L1 minimization, window={LARGE_AVG_WINDOW}', color='red', alpha=0.5, linewidth=2)
     ax.set_xlabel('coinjoin in time')
     ax.set_ylabel('inputs prediction factor')
+
+    # Plot explict time ticks instead of
+    plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
 
     #
     # Compute number of predicted wallets
@@ -987,6 +1016,7 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
         ax2.tick_params(axis='y', colors=COLOR_WALLETS_INPUTS)
 
     # Finalize graph
+    plt.subplots_adjust(bottom=0.15)
     ax.set_title(f'Wallets prediction factor variability: {mix_id}')
     ax.legend(loc='upper left')
     save_path = os.path.join(target_load_path, f'{mix_id}_inputs_prediction_factor_dynamics')
