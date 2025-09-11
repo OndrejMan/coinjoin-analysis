@@ -38,7 +38,7 @@ def load_json_from_file(file_path: str | Path) -> dict:
         return orjson.loads(file.read())
 
 
-def save_json_to_file(file_path: str, data: dict):
+def save_json_to_file(file_path: str, data: dict | list):
     with open(file_path, "wb") as file:
         file.write(orjson.dumps(data))
 
@@ -1261,7 +1261,6 @@ def extract_tx_info(txid: str, raw_txs: dict):
     :return: parsed transaction record
     """
 
-    # Use pre-loaded transactions if available
     tx_info = raw_txs[txid]
 
     input_addresses = {}
