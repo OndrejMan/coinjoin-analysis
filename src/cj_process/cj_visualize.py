@@ -2,6 +2,7 @@ import os
 from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
+from html import escape
 
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -1579,3 +1580,198 @@ def plot_num_wallets(mix_id: str, data: dict, avg_input_ratio: dict, ax):
         ax.legend()
 
     return num_wallets_predicted
+
+
+def generate_liquidity_summary_html(coords: list, target_path: str):
+    """
+    Generate an embeddable HTML segment (no <html>/<head>/<body>) from a stats JSON.
+    Now merges Inputs per CoinJoin and Outputs per CoinJoin into a single tab.
+    """
+
+    def fmt_btc(x):
+        s = f"{float(x):.8f}".rstrip('0').rstrip('.')
+        return s
+
+    def safe(x):
+        return escape(str(x)) if x is not None else ""
+
+    def build_kv(key, value):
+        return f'<span class="kv"><span class="k">{safe(key)}</span><span class="v">{safe(value)}</span></span>'
+
+    def build_card(title, items):
+        return f'''
+        <div class="card">
+          <div class="card-title">{escape(title)}</div>
+          <div class="card-body">
+            {''.join(items)}
+          </div>
+        </div>
+        '''
+
+    for coord in coords:
+        pool_name = f'{coord[0]}_{coord[1]}' if len(coord[1]) > 0 else f'{coord[0]}'
+        load_path = os.path.join(target_path, f'liquidity_summary_{pool_name}.json')
+        print(f'Loading liquidity file {load_path}')
+        data = als.load_json_from_file(load_path)
+        if not data:
+            print(f'  {load_path} not loaded, continuing...')
+            continue
+
+        earliest_time = data.get("earliest_time")
+        latest_time = data.get("latest_time")
+        earliest_cjtx = data.get("earliest_cjtx")
+        latest_cjtx = data.get("latest_cjtx")
+        total_coinjoins = data.get("total_coinjoins")
+
+        min_inputs = data.get("min_inputs")
+        max_inputs = data.get("max_inputs")
+        avg_inputs = data.get("avg_inputs")
+        median_inputs = data.get("median_inputs")
+
+        min_outputs = data.get("min_outputs")
+        max_outputs = data.get("max_outputs")
+        avg_outputs = data.get("avg_outputs")
+        median_outputs = data.get("median_outputs")
+
+        total_fresh_inputs_value = data.get("total_fresh_inputs_value")
+        total_friends_inputs_value = data.get("total_friends_inputs_value")
+        total_unmoved_outputs_value = data.get("total_unmoved_outputs_value")
+        total_leaving_outputs_value = data.get("total_leaving_outputs_value")
+        total_nonstandard_leaving_outputs_value = data.get("total_nonstandard_leaving_outputs_value")
+        total_fresh_inputs_without_nonstandard_outputs_value = data.get(
+            "total_fresh_inputs_without_nonstandard_outputs_value")
+
+        ratios_keys = [
+            ("Fresh inputs / total inputs", data.get("ratio_fresh_inputs_2_total_inputs")),
+            ("Friends inputs / total inputs", data.get("ratio_friends_inputs_2_total_inputs")),
+            ("Leaving outputs / total outputs", data.get("ratio_leaving_outputs_2_total_outputs")),
+            ("Staying outputs / total outputs", data.get("ratio_staying_outputs_2_total_outputs")),
+            ("Staying / non-remix outputs", data.get("ratio_staying_outputs_2_nonremix_outputs")),
+            ("Remixed inputs / total (numbers)", data.get("ratio_remixed_inputs_2_total_inputs_numbers")),
+            ("Remixed inputs / total (values)", data.get("ratio_remixed_inputs_2_total_inputs_values")),
+        ]
+
+        period = ""
+        if earliest_time and latest_time:
+            #period = f"{safe(earliest_time)} — {safe(latest_time)}"
+            period = f'{safe(earliest_time)} <a href="https://mempool.space/tx/{earliest_cjtx}">(tx)</a> — {safe(latest_time)} <a href="https://mempool.space/tx/{latest_cjtx}">(tx)</a>'
+
+        # <h2>{coord[0]} — {coord[1]}</h2>
+        header_html = f'''
+        <div class="cjseg-header">
+          <div class="meta">Total coinjoins: <b>{safe(total_coinjoins)}</b></div>
+          <div class="meta">Period         : <b>{period}</b></div>
+        </div>
+        '''
+
+        # Build the combined IO panel (single tab)
+        inputs_line = f"{safe(min_inputs)} / {safe(round(avg_inputs, 1) if isinstance(avg_inputs, (int, float)) else avg_inputs)} / {safe(median_inputs)} / {safe(max_inputs)}"
+        outputs_line = f"{safe(min_outputs)} / {safe(round(avg_outputs, 1) if isinstance(avg_outputs, (int, float)) else avg_outputs)} / {safe(median_outputs)} / {safe(max_outputs)}"
+
+        io_panel_inner = f'''
+          <div class="io-grid">
+            <div class="io-col">
+              <div class="over">Inputs per CJ</div>
+              <div class="mono">{inputs_line}</div>
+              <div class="under">min / avg / median / max</div>
+            </div>
+            <div class="io-col">
+              <div class="over">Outputs per CJ</div>
+              <div class="mono">{outputs_line}</div>
+              <div class="under">min / avg / median / max</div>
+            </div>
+          </div>
+        '''
+
+        tabs_html = f'''
+        <div class="tabs" role="tablist" aria-label="Stats tabs">
+          <button class="tab active" role="tab" aria-selected="true" tabindex="0">Inputs &amp; Outputs</button>
+        </div>
+        <div class="tab-panels">
+          <div class="tab-panel show" role="tabpanel">
+            {io_panel_inner}
+          </div>
+        </div>
+        '''
+
+        ratio_items = [build_kv(k, v) for k, v in ratios_keys if v]
+        ratio_card = build_card("Key Ratios", ratio_items)
+
+        totals = []
+        if total_fresh_inputs_value is not None:
+            totals.append(build_kv("Fresh inputs (BTC)", fmt_btc(total_fresh_inputs_value)))
+        if total_friends_inputs_value is not None:
+            totals.append(build_kv("Friends inputs (BTC)", fmt_btc(total_friends_inputs_value)))
+        if total_unmoved_outputs_value is not None:
+            totals.append(build_kv("Unmoved outputs (BTC)", fmt_btc(total_unmoved_outputs_value)))
+        if total_leaving_outputs_value is not None:
+            totals.append(build_kv("Leaving outputs (BTC)", fmt_btc(total_leaving_outputs_value)))
+        if total_nonstandard_leaving_outputs_value is not None:
+            totals.append(build_kv("Nonstandard leaving (BTC)", fmt_btc(total_nonstandard_leaving_outputs_value)))
+        if total_fresh_inputs_without_nonstandard_outputs_value is not None:
+            totals.append(build_kv("Fresh inputs w/o nonstandard (BTC)",
+                                   fmt_btc(total_fresh_inputs_without_nonstandard_outputs_value)))
+
+        totals_card = build_card("Aggregate Values", totals) if totals else ""
+
+        css = '''
+        <style>
+        .cjseg { --fg:#111; --bg:#fff; --muted:#666; --line:#e5e7eb; --accent:#111; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color:var(--fg);}
+        .cjseg .cjseg-header { margin-bottom: 12px; }
+        .cjseg h2 { margin: 0; font-size: 1.35rem; font-weight: 700; line-height: 1.3; }
+        .cjseg .sub { color: var(--muted); margin-top: 2px; font-size: 0.9rem; }
+        .cjseg .meta { margin-top: 6px; font-size: 0.95rem; }
+        .cjseg .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 10px; }
+
+        /* Cards */
+        .cjseg .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg); }
+        .cjseg .card-title { font-weight: 600; margin-bottom: 6px; }
+        .cjseg .card-body { display: grid; gap: 4px; }
+        .cjseg .kv { display: flex; justify-content: space-between; gap: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.92rem; }
+        .cjseg .kv .k { color: var(--muted); }
+        .cjseg .kv .v { font-weight: 600; }
+
+        /* Tabs (single) */
+        .cjseg .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 10px 0 8px; }
+        .cjseg .tab { background: transparent; border: none; padding: 6px 8px; font-weight: 600; cursor: default; color: var(--fg); border-bottom: 2px solid var(--fg); }
+        .cjseg .tab-panels { margin-top: 4px; }
+        .cjseg .tab-panel { display: none; }
+        .cjseg .tab-panel.show { display: block; }
+
+        /* IO panel */
+        .cjseg .io-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 10px; }
+        .cjseg .io-col { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+        .cjseg .io-col .over { font-weight: 600; margin-bottom: 2px; }
+        .cjseg .io-col .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.98rem; }
+        .cjseg .io-col .under { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+
+        .cjseg .foot { margin-top: 8px; color: var(--muted); font-size: 0.85rem; }
+        @media (prefers-color-scheme: dark) {
+          .cjseg { --fg:#e5e7eb; --bg:#0b0b0b; --muted:#9aa0a6; --line:#2a2a2a; --accent:#e5e7eb; }
+          .cjseg .card { background: #121212; }
+          .cjseg .io-col { background: #121212; }
+        }
+        </style>
+        '''
+
+        html = f'''
+        <section class="cjseg" aria-label="Liquidity summary">
+          {css}
+          {header_html}
+
+          {tabs_html}
+
+          <div class="grid">
+            {ratio_card}
+            {totals_card}
+          </div>
+
+        </section>
+        '''.strip()
+        #          <div class="foot">Source: coordinator logs. Segment is self-contained and embeddable.</div>
+
+        out_path = os.path.join(target_path, f'{coord[0]}_{coord[1]}.html')
+        with open(out_path, "w", encoding="utf-8") as out:
+            SM.print(f'Saving html export at {out_path}')
+            out.write(html)
+

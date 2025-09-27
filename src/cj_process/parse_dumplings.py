@@ -3660,7 +3660,23 @@ def main(argv=None):
         print_remix_stats(op.target_base_path)
 
     if op.ANALYSIS_LIQUIDITY:
+        # Analyze and save liquidity
         analyze_liquidity_summary(op.CJ_TYPE, target_path)
+
+        # Generate html fragment with liqudity for web
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            mix_ids = cjc.WASABI2_COORD_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
+            coords = [('wasabi2', coord_name) for coord_name in mix_ids]
+        if op.CJ_TYPE == CoinjoinType.WW1:
+            coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
+        if op.CJ_TYPE == CoinjoinType.JM:
+            coords = [('joinmarket', 'all')]
+        if op.CJ_TYPE == CoinjoinType.SW:
+            mix_ids = cjc.WHIRLPOOL_POOL_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
+            coords = [('whirlpool', coord_name[10:]) for coord_name in mix_ids]
+            print(coords)
+
+        cjvis.generate_liquidity_summary_html(coords, target_path)
 
     if op.ANALYSIS_OUTPUT_CLUSTERS:
         analyze_zksnacks_output_clusters('wasabi2', target_path)
