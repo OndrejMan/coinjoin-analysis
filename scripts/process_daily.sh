@@ -66,6 +66,8 @@ source $BASE_PATH/btc/coinjoin-analysis/venv/bin/activate
 cd $BASE_PATH/btc/coinjoin-analysis/src
 python3 -m cj_process.file_check $TMP_DIR/Scanner/  | tee parse_dumplings.py.log
 
+# Summary of executed analysis
+echo "{\"date\":\"$(date +%d-%m-%Y)\",\"lastProcessedBlockHeight\":\"$(cat $TMP_DIR/Scanner/LastProcessedBlockHeight.txt)\"}" > $TMP_DIR/Scanner/summary.json
 
 
 #
@@ -162,5 +164,7 @@ montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_til
 # Upload selected files (separate scripts, can be configured based on desired upload service)
 #
 $BASE_PATH/btc/coinjoin-analysis/scripts/upload_results.sh
+
+echo "###############################################" >> $BASE_PATH/btc/summary.log
 
 
