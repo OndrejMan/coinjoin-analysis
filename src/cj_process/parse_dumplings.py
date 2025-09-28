@@ -2350,15 +2350,17 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
         coords = []
         if mix_protocol == CoinjoinType.WW2:
             coords = [('wasabi2', coord_name) for coord_name in cjc.WASABI2_COORD_NAMES_ALL]
+            coords.append(('wasabi2', ''))  # Add record or all coordinators together
         if mix_protocol == CoinjoinType.WW1:
             coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
         if mix_protocol == CoinjoinType.JM:
             coords = [('joinmarket', 'all')]
         for coord in coords:
-            cjtx_coord = als.load_coinjoins_from_file(os.path.join(target_path, f'{coord[0]}_{coord[1]}'), None, True)
-            SM.print(f'{coord[0]}_{coord[1]}')
-            liq_sum = als.print_liquidity_summary(cjtx_coord["coinjoins"], f'{coord[0]}_{coord[1]}')
-            als.save_json_to_file_pretty(os.path.join(target_path, f'liquidity_summary_{coord[0]}_{coord[1]}.json'), liq_sum)
+            mix_id = f'{coord[0]}_{coord[1]}' if len(coord[1]) > 0 else f'{coord[0]}'
+            cjtx_coord = als.load_coinjoins_from_file(os.path.join(target_path, f'{mix_id}'), None, True)
+            SM.print(f'{mix_id}')
+            liq_sum = als.print_liquidity_summary(cjtx_coord["coinjoins"], f'{mix_id}')
+            als.save_json_to_file_pretty(os.path.join(target_path, f'liquidity_summary_{mix_id}.json'), liq_sum)
 
 
 def discover_coordinators(cjtxs: dict, sorted_cjtxs: list, coord_txs: dict, in_or_out: str,
@@ -3667,6 +3669,7 @@ def main(argv=None):
         if op.CJ_TYPE == CoinjoinType.WW2:
             mix_ids = cjc.WASABI2_COORD_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
             coords = [('wasabi2', coord_name) for coord_name in mix_ids]
+            coords.append(('wasabi2', ''))  # Add record or all coordinators together
         if op.CJ_TYPE == CoinjoinType.WW1:
             coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
         if op.CJ_TYPE == CoinjoinType.JM:

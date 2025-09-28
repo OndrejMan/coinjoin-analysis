@@ -1770,7 +1770,7 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
         '''.strip()
         #          <div class="foot">Source: coordinator logs. Segment is self-contained and embeddable.</div>
 
-        out_path = os.path.join(target_path, f'{coord[0]}_{coord[1]}.html')
+        out_path = os.path.join(target_path, f'{pool_name}.html')
         with open(out_path, "w", encoding="utf-8") as out:
             SM.print(f'Saving html export at {out_path}')
             out.write(html)
