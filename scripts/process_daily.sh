@@ -14,8 +14,9 @@ echo "###############################################" >> $BASE_PATH/btc/summary
 rm -rf $TMP_DIR/
 # Create new temporary directory
 mkdir $TMP_DIR/
-#Unzip processed dumplings files
-unzip $BASE_PATH/btc/dumplings.zip -d $TMP_DIR/
+# Unzip processed dumplings files
+#unzip $BASE_PATH/btc/dumplings.zip -d $TMP_DIR/
+unzip $BASE_PATH/dumplings.zip -d $TMP_DIR/
 
 
 
@@ -90,6 +91,12 @@ find "$TMP_DIR" -type f \( -name "*.json" -o -name "*.pdf" -o -name "*.png" -o -
     #echo "Copying $file to $DEST_DIR/$REL_PATH"
 done
 echo "Selected files archived to: $DEST_DIR"
+
+
+#
+# Compute aggregated liquidity statistics from many previous daily runs
+#
+python $BASE_PATH/btc/coinjoin-analysis/src/cj_process/scan_results_plot.py $BASE_PATH/data/dumplings_archive/ liquidity_summary_wasabi2_kruw
 
 
 #

@@ -27,6 +27,9 @@ for dir in wasabi2 wasabi2_others wasabi2_zksnacks; do
     cp $BASE_PATH/btc/coinjoin-analysis/data/wasabi2/txid_coord.json $TMP_DIR/Scanner/$dir/
 done
 python3 -m cj_process.parse_dumplings --cjtype ww2 --action detect_coordinators --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+# Evaluate intermix flows for detected coordinators
+python3 -m cj_process.parse_dumplings --cjtype ww2 --target-path $TMP_DIR/ --env_vars "ANALYZE_DETECT_COORDINATORS_ALG=True"
+
 
 # Run false positives detection
 python3 -m cj_process.parse_dumplings --cjtype ww2 --action detect_false_positives --target-path $TMP_DIR/ | tee parse_dumplings.py.log
