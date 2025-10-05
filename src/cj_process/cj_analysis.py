@@ -1,9 +1,10 @@
 import os
 import subprocess
-from collections import Counter
+from collections import Counter, defaultdict
 import sqlite3
 import logging
 from pathlib import Path
+from typing import List
 
 #import msgpack
 import orjson
@@ -67,6 +68,32 @@ def detect_no_inout_remix_txs(coinjoins):
     no_remix['both_noremix'] = {cjtx: coinjoins[cjtx]['broadcast_time'] for cjtx in noremix_txs}
     logging.warning(f'Txs with no input&output remix: {no_remix["both_noremix"]}')
     return no_remix
+
+
+def detect_stdenom_rbf_notap_onechange_txs(coinjoins):
+    hits = {'stdenom_rbf_notap_onechange': {}}
+    for cjtx in coinjoins.keys():
+        # Is RBF?
+        if coinjoins[cjtx].get('isRbf', 'unknown') == 'yes':
+            script_freq = coinjoins[cjtx].get('script_frequencies', None)
+
+            # Is zero Taproot?
+            isZeroTaproot = False
+            if script_freq:
+                if len(script_freq['inputs']) == 1 and script_freq['inputs'].get('TxWitnessV1Taproot', 0) == 0:
+                    #and len(script_freq['outputs']) == 1 and script_freq['outputs'].get('TxWitnessV1Taproot', 0) == 0):
+                    isZeroTaproot = True
+            if isZeroTaproot:
+
+                # Has exactly one change output?
+                output_denoms = [coinjoins[cjtx]['outputs'][index]['value'] for index in coinjoins[cjtx]['outputs'].keys()]
+                counts = Counter(output_denoms).values()
+                isExactlyOneChange = (min(counts, default=0) == 1) and (sum(c == 1 for c in counts) == 1)
+
+                if isExactlyOneChange:
+                    hits['stdenom_rbf_notap_onechange'][cjtx] = coinjoins[cjtx]['broadcast_time']
+
+    return hits
 
 
 def detect_address_reuse_txs(coinjoins, reuse_threshold: float):

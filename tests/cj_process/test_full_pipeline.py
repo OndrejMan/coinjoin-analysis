@@ -115,12 +115,14 @@ def test_run_cj_process_ww2():
                            'outputs_noremix']) == 6, f"Expected {6} no outputs remix coinjoins, got {len(results['outputs_noremix'])}"
             assert len(results[
                            'both_noremix']) == 2, f"Expected {2} both no remix coinjoins, got {len(results['both_noremix'])}"
-            assert len(results[
-                           'specific_denoms_noremix_in']) == 5, f"Expected {5} specific denoms noinput in, got {len(results['specific_denoms_noremix_in'])}"
-            assert len(results[
-                           'specific_denoms_noremix_out']) == 6, f"Expected {6} specific denoms noinput out, got {len(results['specific_denoms_noremix_out'])}"
-            assert len(results[
-                           'specific_denoms_noremix_both']) == 2, f"Expected {2} specific denoms noinput both, got {len(results['specific_denoms_noremix_both'])}"
+            DETECT_STRANGE_DENOMS = False
+            if DETECT_STRANGE_DENOMS:
+                assert len(results[
+                               'specific_denoms_noremix_in']) == 5, f"Expected {5} specific denoms noinput in, got {len(results['specific_denoms_noremix_in'])}"
+                assert len(results[
+                               'specific_denoms_noremix_out']) == 6, f"Expected {6} specific denoms noinput out, got {len(results['specific_denoms_noremix_out'])}"
+                assert len(results[
+                               'specific_denoms_noremix_both']) == 2, f"Expected {2} specific denoms noinput both, got {len(results['specific_denoms_noremix_both'])}"
             assert len(results[
                            'inputs_address_reuse_0_70']) == 0, f"Expected {0} input address reuse, got {len(results['inputs_address_reuse_0_70'])}"
             assert len(results[
@@ -370,12 +372,14 @@ def test_run_cj_process_jm():
                            'outputs_noremix']) == 10, f"Expected {10} no outputs remix coinjoins, got {len(results['outputs_noremix'])}"
             assert len(results[
                            'both_noremix']) == 4, f"Expected {4} both no remix coinjoins, got {len(results['both_noremix'])}"
-            assert len(results[
+            DETECT_STRANGE_DENOMS = False
+            if DETECT_STRANGE_DENOMS:
+                assert len(results[
                            'specific_denoms_noremix_in']) == 0, f"Expected {0} specific denoms noinput in, got {len(results['specific_denoms_noremix_in'])}"
-            assert len(results[
-                           'specific_denoms_noremix_out']) == 0, f"Expected {0} specific denoms noinput out, got {len(results['specific_denoms_noremix_out'])}"
-            assert len(results[
-                           'specific_denoms_noremix_both']) == 0, f"Expected {0} specific denoms noinput both, got {len(results['specific_denoms_noremix_both'])}"
+                assert len(results[
+                               'specific_denoms_noremix_out']) == 0, f"Expected {0} specific denoms noinput out, got {len(results['specific_denoms_noremix_out'])}"
+                assert len(results[
+                               'specific_denoms_noremix_both']) == 0, f"Expected {0} specific denoms noinput both, got {len(results['specific_denoms_noremix_both'])}"
             assert len(results[
                            'inputs_address_reuse_0_70']) == 0, f"Expected {0} input address reuse, got {len(results['inputs_address_reuse_0_70'])}"
             assert len(results[
