@@ -6,12 +6,14 @@ from html import escape
 
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.dates as mdates
 import mpl_toolkits.axisartist as AA
 
 import numpy as np
 from scipy.optimize import minimize
 from scipy import stats
 
+import pandas as pd
 
 from cj_process.cj_consts import *
 from cj_process.cj_structs import *
@@ -1775,3 +1777,89 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
             SM.print(f'Saving html export at {out_path}')
             out.write(html)
 
+
+def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefix: str):
+    for coordinator, records in intercoord_ratios.items():
+        if len(records) == 0:
+            continue
+        # Convert nested dict into DataFrame
+        df = pd.DataFrame.from_dict(records, orient="index")
+        # Parse timestamps and sort
+        df["broadcast_time"] = pd.to_datetime(df["broadcast_time"])
+        df = df.sort_values("broadcast_time").reset_index(drop=True)
+
+        # Plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(df["broadcast_time"], df["out_ratio"], label="outputs", alpha=0.3)
+        plt.plot(df["broadcast_time"], df["in_ratio"], label="inputs", alpha=0.7)
+        plt.axhline(0.4, color="gray", linestyle="--", linewidth=1, label="threshold (0.4)")
+        ax = plt.gca()
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+        plt.xticks(rotation=30, ha="right")
+        plt.ylabel("ratio")
+        plt.title(f"'{coordinator}': intermixed ratio of inputs & outputs over time")
+        plt.legend()
+        plt.tight_layout()
+
+        plt.savefig(Path(target_path, f"{prefix}in_out_ratio_over_time__{coordinator}.png"), dpi=200, bbox_inches="tight")
+        #plt.savefig(Path(target_path, f"in_out_ratio_over_time__{coordinator}.pdf"), dpi=200, bbox_inches="tight")
+        plt.close()
+
+        coordinators = []
+        in_series = []
+        out_series = []
+        for coordinator, records in intercoord_ratios.items():
+            df = pd.DataFrame.from_dict(records, orient="index")
+            in_vals = pd.to_numeric(df["in_ratio"],
+                                    errors="coerce").dropna().tolist() if "in_ratio" in df.columns else []
+            out_vals = pd.to_numeric(df["out_ratio"],
+                                     errors="coerce").dropna().tolist() if "out_ratio" in df.columns else []
+            if len(in_vals) == 0 and len(out_vals) == 0:
+                continue
+            coordinators.append(coordinator)
+            in_series.append(in_vals if len(in_vals) > 0 else [float("nan")])
+            out_series.append(out_vals if len(out_vals) > 0 else [float("nan")])
+
+        M = len(coordinators)
+        if M == 0:
+            raise RuntimeError("No coordinators with in_ratio/out_ratio data found.")
+
+        base_positions = list(range(M))
+        offset = 0.15
+        in_positions = [bp - offset for bp in base_positions]
+        out_positions = [bp + offset for bp in base_positions]
+
+        plt.figure(figsize=(max(8, M * 0.9), 5))
+
+        bp_in = plt.boxplot(in_series, positions=in_positions, widths=0.25, patch_artist=True, showfliers=False)
+        for patch in bp_in["boxes"]:
+            patch.set(facecolor="#f28e2b")
+        for element in ["whiskers", "caps", "medians"]:
+            for line in bp_in[element]:
+                line.set(color="#6b6b6b", linewidth=1.2)
+
+        bp_out = plt.boxplot(out_series, positions=out_positions, widths=0.25, patch_artist=True, showfliers=False)
+        for patch in bp_out["boxes"]:
+            patch.set(facecolor="#4e79a7")
+
+        # Rotate labels 45 degrees
+        plt.xticks(base_positions, coordinators, rotation=45, ha="right")
+
+        for element in ["whiskers", "caps", "medians"]:
+            for line in bp_out[element]:
+                line.set(color="#6b6b6b", linewidth=1.2)
+
+        plt.xticks(base_positions, coordinators)
+        plt.ylabel("ratio")
+        plt.title("Ratio of intermixed inputs and outputs under same coordinator")
+
+        # Add dashed horizontal line at 0.4
+        plt.axhline(0.4, color="gray", linestyle="--", linewidth=1)
+
+        legend_handles = [bp_in["boxes"][0], bp_out["boxes"][0]]
+        plt.legend(legend_handles, ["inputs", "outputs"], loc="lower left")
+
+        plt.tight_layout()
+        plt.savefig(Path(target_path, f"{prefix}all_coordinators_in_out_boxplot.png"), dpi=200, bbox_inches="tight")
+        plt.close()

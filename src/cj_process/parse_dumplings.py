@@ -2773,6 +2773,14 @@ def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_know
         with_date_sorted = sorted(with_date, key=lambda x: cjtxs[x]['broadcast_time'])
         coord_txs_named_sorted[coord_id] = without_date_sorted + with_date_sorted
 
+    PRINT_FINAL = False
+    if PRINT_FINAL:
+        als.print_coordinators_counts(coord_txs_named, 2)
+        coord_txs_filtered = {coord_id: coord_txs_named[coord_id] for coord_id in coord_txs_named.keys() if
+                              len(coord_txs_named[coord_id]) >= MIN_COORD_CJTXS}
+        #print(coord_txs_filtered)
+        print(f'# Total non-small coordinators (min={MIN_COORD_CJTXS}): {len(coord_txs_filtered)}')
+
     return merge_candidates_dict, coord_txs, coord_txs_named, coord_txs_named_sorted
 
 
@@ -2819,13 +2827,8 @@ def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path)
     als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_merge_candidates.json'), merge_candidates_dict)
     als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered_renamed.json'), coord_txs_named_sorted)
 
-    PRINT_FINAL = False
-    if PRINT_FINAL:
-        als.print_coordinators_counts(coord_txs_named, 2)
-        coord_txs_filtered = {coord_id: coord_txs_named[coord_id] for coord_id in coord_txs_named.keys() if
-                              len(coord_txs_named[coord_id]) >= MIN_COORD_CJTXS}
-        #print(coord_txs_filtered)
-        print(f'# Total non-small coordinators (min={MIN_COORD_CJTXS}): {len(coord_txs_filtered)}')
+    tx_to_coord_map = {txid:coord for coord in coord_txs_named.keys() for txid in coord_txs_named[coord]}
+    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_to_coord_discovered_renamed.json'), tx_to_coord_map)
 
 
 def parse_arguments(argv):
@@ -2903,6 +2906,7 @@ class DumplingsParseOptions:
     ANALYSIS_BYBIT_HACK = False
     ANALYSIS_OUTPUT_CLUSTERS = False
     ANALYSIS_WALLET_PREDICTION = False
+    ANALYZE_DETECT_COORDINATORS_ALG = False
 
     target_base_path = ''
     #interval_stop_date = '2024-10-10 00:00:07.000'  # Last date to be analyzed, e.g., 2024-10-10 00:00:07.000
@@ -2999,6 +3003,7 @@ class DumplingsParseOptions:
         self.ANALYSIS_BYBIT_HACK = False
         self.ANALYSIS_OUTPUT_CLUSTERS = False
         self.ANALYSIS_WALLET_PREDICTION = False
+        self.ANALYZE_DETECT_COORDINATORS_ALG = False
 
         self.PLOT_REMIXES_FLOWS = False
         self.PLOT_INTERMIX_FLOWS = False
@@ -3729,6 +3734,23 @@ def main(argv=None):
                 cjvis.estimate_wallet_prediction_factor(target_path, coord)
         if op.CJ_TYPE == CoinjoinType.WW1:
             cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
+
+    if op.ANALYZE_DETECT_COORDINATORS_ALG:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            # Load all coinjoins
+            cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2_others'), None, True)
+
+            tx_list = {'crawl': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))['crawl']}  # Load known coordinators
+            ground_truth_known_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
+            intercoord_ratios = als.analyze_coordinator_detection(cjtxs, ground_truth_known_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
+            als.save_json_to_file_pretty(os.path.join(target_path, f'crawl_intercoord_mix_ratios.json'), intercoord_ratios)
+            cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'crawl_')
+
+            tx_list = {'all': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json'))}  # Load known coordinators
+            assigned_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
+            intercoord_ratios = als.analyze_coordinator_detection(cjtxs, assigned_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
+            als.save_json_to_file_pretty(os.path.join(target_path, f'discovered_intercoord_mix_ratios.json'), intercoord_ratios)
+            cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'discovered_')
 
 
     print('### SUMMARY #############################')

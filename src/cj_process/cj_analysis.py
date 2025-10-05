@@ -1406,3 +1406,32 @@ def streamline_coinjoins_structure(all_data:dict, compact_strong: bool=False):
 
     return full_txid_mapping
 
+
+def analyze_coordinator_detection(cjtxs: dict, tx_list: dict, coords: List):
+    # Transform dictionary to {'coord': [cjtxs]} format
+    tx_list_t = defaultdict(list)
+    for key, value in tx_list.items():
+        tx_list_t[value].append(key)
+
+    # For given coordinator, compute statistics for all its transactions
+    intercoord_ratios = {}
+    for coord in coords:
+        intercoord_ratios[coord] = {}
+        # Compute ratio of in-coordinator remixes
+        # For each remixed input, check if it is coming form the same coordinator
+        for txid in tx_list_t[coord]:
+            if txid in cjtxs['coinjoins'].keys():
+                remix_inputs = [index for  index in cjtxs['coinjoins'][txid]['inputs'].keys() if cjtxs['coinjoins'][txid]['inputs'][index]['mix_event_type'] == 'MIX_REMIX']
+                remix_outputs = [index for  index in cjtxs['coinjoins'][txid]['outputs'].keys() if cjtxs['coinjoins'][txid]['outputs'][index]['mix_event_type'] == 'MIX_REMIX']
+                num_same_coord_inputs = sum([1 for index in remix_inputs
+                                             if 'spending_tx' in cjtxs['coinjoins'][txid]['inputs'][index]
+                                             and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['inputs'][index]['spending_tx'])[0], '-') == coord])
+                num_same_coord_outputs = sum([1 for index in remix_outputs
+                                              if 'spend_by_tx' in cjtxs['coinjoins'][txid]['outputs'][index]
+                                              and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['outputs'][index]['spend_by_tx'])[0], '-') == coord])
+                intercoord_ratios[coord][txid] = {'broadcast_time': cjtxs['coinjoins'][txid]['broadcast_time'],
+                                                 'in_ratio': num_same_coord_inputs / len(remix_inputs) if len(remix_inputs) > 0 else 0,
+                                                 'out_ratio': num_same_coord_outputs / len(remix_outputs) if len(remix_outputs) > 0 else 0}
+
+    return intercoord_ratios
+
