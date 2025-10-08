@@ -96,8 +96,9 @@ echo "Selected files archived to: $DEST_DIR"
 #
 # Compute aggregated liquidity statistics from many previous daily runs
 #
-python $BASE_PATH/btc/coinjoin-analysis/src/cj_process/scan_results_plot.py $BASE_PATH/data/dumplings_archive/ liquidity_summary_wasabi2_kruw
-
+for dir in zksnacks kruw gingerwallet opencoordinator wasabicoordinator coinjoin_nl wasabist dragonordnance mega btip; do
+    python $BASE_PATH/btc/coinjoin-analysis/src/cj_process/scan_results_plot.py $BASE_PATH/data/dumplings_archive/ liquidity_summary_wasabi2_$dir
+done
 
 #
 # Create montage from multiple selected images
