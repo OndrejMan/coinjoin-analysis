@@ -74,7 +74,9 @@ echo "{\"date\":\"$(date +%d-%m-%Y)\",\"lastProcessedBlockHeight\":\"$(cat $TMP_
 #
 # Backup outputs
 #
-DEST_DIR="$BASE_PATH/data/dumplings_archive/results_$(date +%Y%m%d)"
+BASE_BACKUP_PATH=/mnt
+DEST_DIR="$BASE_BACKUP_PATH/data/dumplings_archive/results_$(date +%Y%m%d)"
+echo $DEST_DIR 
 
 # Get the absolute paths of source and destination
 SOURCE_DIR=$(realpath "$TMP_DIR")
@@ -97,13 +99,15 @@ echo "Selected files archived to: $DEST_DIR"
 # Compute aggregated liquidity statistics from many previous daily runs
 #
 for dir in zksnacks kruw gingerwallet opencoordinator wasabicoordinator coinjoin_nl wasabist dragonordnance mega btip; do
-    python $BASE_PATH/btc/coinjoin-analysis/src/cj_process/scan_results_plot.py $BASE_PATH/data/dumplings_archive/ liquidity_summary_wasabi2_$dir
+    python $BASE_PATH/btc/coinjoin-analysis/src/cj_process/scan_results_plot.py $BASE_BACKUP_PATH/data/dumplings_archive/ liquidity_summary_wasabi2_$dir
 done
+# Copy resulting files to the folder of a current day
+cp -p $BASE_BACKUP_PATH/data/dumplings_archive/*.png "$DEST_DIR/Scanner/"
 
 #
 # Create montage from multiple selected images
 #
-DEST_DIR="$BASE_PATH/data/dumplings_archive/results_$(date +%Y%m%d)"
+DEST_DIR="$BASE_BACKUP_PATH/data/dumplings_archive/results_$(date +%Y%m%d)"
 
 # Wasabi2
 image_list=""
@@ -120,6 +124,15 @@ for pool in whirlpool_ashigaru_2_5M whirlpool_ashigaru_25M joinmarket_all; do
     image_list="$image_list $pool_PATH"
 done
 montage $image_list -tile 2x -geometry +2+2 $DEST_DIR/Scanner/ashigaru_joinmarket_all_cummul_values_norm.png
+
+# Multi-days stats for relevant coordinators
+image_list=""
+for pool in kruw gingerwallet opencoordinator coinjoin_nl; do
+    pool_PATH="$DEST_DIR/Scanner/liquidity_summary_wasabi2_${pool}_metrics_stacked.png"
+    image_list="$image_list $pool_PATH"
+done
+montage $image_list -tile 2x -geometry +2+2 $DEST_DIR/Scanner/liquidity_multiday_summary.png
+
 
 
 #
