@@ -74,7 +74,7 @@ def read_metrics(json_path: str) -> Dict[str, Any]:
     metrics = {}
     for key in REQUIRED_KEYS:
         if key not in data:
-            raise KeyError(f"Missing key '{key}'")
+            raise KeyError(f"  Missing key '{key}'")
         metrics[key] = data[key]
     return metrics
 
@@ -112,7 +112,7 @@ def main():
             continue
         try:
             metrics = read_metrics(json_path)
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             print(f"WARNING: Skipping {json_path}: {e}", file=sys.stderr)
             skipped += 1
             continue
@@ -141,7 +141,7 @@ def main():
 
     # Top plot
     for k in TOP_SERIES:
-        ax_top.plot(dates, series[k], marker="o", linewidth=1.8, label=k)
+        ax_top.plot(dates, series[k], marker="o", linewidth=1.8, label=k, alpha=0.7)
     ax_top.set_title("Coinjoins & Fresh Inputs")
     ax_top.set_ylabel("Value")
     ax_top.grid(True, alpha=0.3, linestyle="--")
@@ -167,7 +167,7 @@ def main():
     plt.savefig(out_png, dpi=150)
     print(f"Done. Saved: {out_png}")
     if skipped:
-        print(f"Note: Skipped {skipped} folders due to missing/invalid JSON.", file=sys.stderr)
+        print(f"  Note: Skipped {skipped} folders due to missing/invalid JSON.", file=sys.stderr)
 
 
 if __name__ == "__main__":
