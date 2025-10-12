@@ -1482,7 +1482,11 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
     # Load false positives
     false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_path, 'false_cjtxs.json'))
 
-    no_remix_all = {'inputs_noremix': {}, 'outputs_noremix': {}, 'both_noremix': {},
+    # Detected false positives candidates. 3m_xxx contains subset of txs from last 3 months.
+    no_remix_all = {'recent__inputs_noremix': {}, 'recent__outputs_noremix': {}, 'recent__both_noremix': {},
+                    'recent__inputs_address_reuse': {}, 'recent__outputs_address_reuse': {},
+                    'recent__both_reuse': {}, 'recent__stdenom_rbf_notap_onechange': {},
+                    'inputs_noremix': {}, 'outputs_noremix': {}, 'both_noremix': {},
                     'inputs_address_reuse': {}, 'outputs_address_reuse': {},
                     'both_reuse': {}, 'specific_denoms_noremix_in': {}, 'specific_denoms_noremix_out':{},
                     'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {}, 'stdenom_rbf_notap_onechange': {}}
@@ -1546,6 +1550,21 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
                     no_remix_all[key].update(strange_2025_cj_noremix_both[key])
                 for key in strange_2025_cj_noremix_inorout.keys():
                     no_remix_all[key].update(strange_2025_cj_noremix_inorout[key])
+
+    # Pre-filter transactions from past 3 months only for easier human readability
+    recent_items_keys = ['inputs_noremix', 'outputs_noremix', 'both_noremix', 'inputs_address_reuse',
+                         'outputs_address_reuse', 'both_reuse', 'stdenom_rbf_notap_onechange']
+    now = datetime.now()
+    for item in recent_items_keys:
+        no_remix_all[f'recent__{item}'] = {key: no_remix_all[item][key] for key in no_remix_all[item].keys()
+                                      if (now - als.precomp_datetime.strptime(data['coinjoins'][key]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")) <= timedelta(days=30)}
+
+    # for item in no_remix_all.keys():
+    #     if item == '_recent':  # All others than _recent
+    #         continue
+    #     no_remix_all['_recent'][item] = {key: no_remix_all[item][key] for key in no_remix_all[item].keys()
+    #                                   if (now - als.precomp_datetime.strptime(data['coinjoins'][key]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")) <= timedelta(days=30)}
+
 
     # Add used threshold value into key value in dictionary
     reuse_threshold_string = f"{REUSE_THRESHOLD:.2f}".replace('.', '_')
