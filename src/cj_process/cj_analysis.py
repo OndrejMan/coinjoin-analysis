@@ -28,7 +28,14 @@ from cj_process.cj_consts import SATS_IN_BTC, VerboseTransactionInfoLineSeparato
 from cj_process.cj_structs import MIX_EVENT_TYPE, precomp_datetime, MIX_PROTOCOL, SM, CJ_LOG_TYPES, CJ_ALICE_TYPES
 
 
-SORT_COINJOINS_BY_RELATIVE_ORDER = True  # If True then relative ordering of transactions based on remix connections
+# Sorting option for transactions.
+# If False, then mining time of block with the transaction is used.
+# If True then relative ordering of transactions based on remix connections.
+# Important: SORT_COINJOINS_BY_RELATIVE_ORDER=True is causing reordering of transactions wrt their mining time
+#            (broadcast_time_virtual is used instead). This may cause unexpected (seemingly incorrect) situations like transactions being
+#            placed into previous month when splitting into monthly intervals is performed.
+SORT_COINJOINS_BY_RELATIVE_ORDER = True
+
 PERF_USE_COMPACT_CJTX_STRUCTURE = False  # If True, more compacted dictionary with coinjoin records is used
 PERF_USE_SHORT_TXID = False
 PERF_TX_SHORT_LEN = 16
@@ -649,12 +656,10 @@ def extract_interval(data: dict, start_date: str, end_date: str):
     interval_data = {}
     if SORT_COINJOINS_BY_RELATIVE_ORDER:
         interval_data['coinjoins'] = {txid: data['coinjoins'][txid] for txid in data['coinjoins'].keys()
-                                      if start_date < data['coinjoins'][txid][
-                                          'broadcast_time_virtual'] < end_date}
+                                      if start_date < data['coinjoins'][txid]['broadcast_time_virtual'] < end_date}
     else:
         interval_data['coinjoins'] = {txid: data['coinjoins'][txid] for txid in data['coinjoins'].keys()
-                                      if start_date < data['coinjoins'][txid][
-                                          'broadcast_time'] < end_date}
+                                      if start_date < data['coinjoins'][txid]['broadcast_time'] < end_date}
     interval_data['postmix'] = {}
     if 'rounds' in data.keys():
         interval_data['rounds'] = {roundid: data['rounds'][roundid] for roundid in data['rounds'].keys()
