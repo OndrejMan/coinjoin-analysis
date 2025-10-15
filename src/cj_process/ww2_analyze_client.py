@@ -7,6 +7,7 @@ import seaborn as sns
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
+from typing import Iterable, Dict, Tuple, List
 
 import parse_dumplings as dmp
 import cj_analysis as als
@@ -972,6 +973,116 @@ def create_download_script(wallets_names: list, target_path: str, file_name: str
         f.writelines(curl_lines)
 
 
+
+def _z_from_alpha(alpha: float) -> float:
+    table = {
+        0.10: 1.6448536269514722,
+        0.05: 1.959963984540054,
+        0.02: 2.3263478740408408,
+        0.01: 2.5758293035489004,
+        0.001: 3.2905267314919255,
+    }
+    if alpha in table:
+        return table[alpha]
+    raise ValueError(
+        f"alpha={alpha} not in supported set {sorted(table.keys())}. "
+        "Add a numeric inverse-CDF if you need arbitrary alpha."
+    )
+
+def estimate_wallets_from_inputs(
+    num_inputs: Iterable[float],
+    Y: float,
+    alpha: float = 0.05,
+    clip_min: float | None = None,
+) -> Dict[str, float | int | Tuple[float, float]]:
+    """
+    N_hat = Y / mu_hat
+    SE_hat = sqrt( (N_hat * sigma2_hat) / mu_hat^2  +  (Y^2 / mu_hat^4) * (sigma2_hat / m) )
+    CI = N_hat ± z_{1-alpha/2} * SE_hat
+    Also returns mean(K)=mu_hat and ratio Y / mean(K).
+    """
+    arr = np.asarray(list(num_inputs), dtype=float)
+    m = int(arr.size)
+    if m < 2:
+        raise ValueError("Need at least 2 observations in num_inputs to estimate variance.")
+    mu_hat = float(arr.mean())
+    if mu_hat <= 0:
+        raise ValueError(f"Mean of num_inputs must be > 0; got {mu_hat}.")
+    sigma2_hat = float(arr.var(ddof=1))  # unbiased sample variance
+
+    N_hat = float(Y) / mu_hat  # == Y / mean(K)
+
+    SE_hat = math.sqrt(
+        (N_hat * sigma2_hat) / (mu_hat ** 2) +
+        ((Y ** 2) / (mu_hat ** 4)) * (sigma2_hat / m)
+    )
+
+    z = _z_from_alpha(alpha)
+    ci_lo = N_hat - z * SE_hat
+    ci_hi = N_hat + z * SE_hat
+
+    result: Dict[str, float | int | Tuple[float, float]] = {
+        "m": m,
+        "mu_hat": mu_hat,           # mean of K
+        "sigma2_hat": sigma2_hat,
+        "Y_over_meanK": N_hat,      # explicitly expose Y / mean(K)
+        "N_hat": N_hat,
+        "SE_hat": SE_hat,
+        "ci_lo": ci_lo,
+        "ci_hi": ci_hi,
+        "alpha": alpha,
+        "confidence": 1 - alpha,
+    }
+
+    if clip_min is not None:
+        result["N_hat_clipped"] = max(N_hat, float(clip_min))
+        result["ci_lo_clipped"] = max(ci_lo, float(clip_min))
+
+    return result
+
+
+def estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str, cj_stats2: dict, prefix2: str, color2: str):
+    # Estimate wallets estimation bounds
+    plt.figure(figsize=(10, 6))
+
+    def compute_and_plot(cj_stats: dict, distrib_key: str, line_color: str, prefix: str):
+        print(prefix)
+        num_inputs = []
+        for session in cj_stats[distrib_key].keys():
+            num_inputs.extend(cj_stats[distrib_key][session])
+        # Compute across Y = 20..500
+        Ys: List[int] = list(range(20, 501, 10))
+        N_hat_list: List[float] = []
+        ci_lo_list: List[float] = []
+        ci_hi_list: List[float] = []
+
+        for Y in Ys:
+            out = estimate_wallets_from_inputs(num_inputs, int(Y), alpha=0.05, clip_min=1.0)
+            N_hat_list.append(out["N_hat"])
+            ci_lo_list.append(out["ci_lo"])
+            ci_hi_list.append(out["ci_hi"])
+            print(f'  {Y}:\t N={out["N_hat"]:.1f} wallets, 95% CI [{out["ci_lo"]:.1f}, {out["ci_hi"]:.1f}] (Wald CI via delta method using our measured K)')
+
+        plt.plot(Ys, N_hat_list, label=f"Num. wallets point estimate ({prefix}, m={len(num_inputs)})", color=line_color, alpha=0.7, linewidth=3)
+        plt.plot(Ys, ci_hi_list, label=f"Upper bound ({prefix}) (CI=95%)", linestyle='-.', color=line_color, alpha=0.7)
+        plt.plot(Ys, ci_lo_list, label=f"Lower bound ({prefix}) (CI=95%)", linestyle='--', color=line_color, alpha=0.7)
+
+    compute_and_plot(cj_stats1, 'num_inputs', color1, f'{prefix1}_in')
+    compute_and_plot(cj_stats1, 'num_outputs', 'coral', f'{prefix1}_out')
+    compute_and_plot(cj_stats2, 'num_inputs', color2, f'{prefix2}_in')
+    compute_and_plot(cj_stats2, 'num_outputs', 'darkblue', f'{prefix2}_out')
+
+    plt.xlabel("Number of coinjoin inputs/outputs")
+    plt.ylabel("Estimated number of wallets")
+    plt.title("Wallet count estimate and 95% Wald CI vs # coinjoin inputs/outputs")
+    plt.legend()
+    plt.tight_layout()
+    save_file = os.path.join(base_path, f'{prefix1}_{prefix2}_wallet_predict_confidence')
+    plt.savefig(f'{save_file}.png', dpi=300)
+    plt.savefig(f'{save_file}.pdf', dpi=300)
+    plt.close()
+
+
 if __name__ == "__main__":
     als.SORT_COINJOINS_BY_RELATIVE_ORDER = False
     # round_logs = als.parse_client_coinjoin_logs(target_path)
@@ -980,14 +1091,21 @@ if __name__ == "__main__":
     # prison_logs = analyse_prison_logs(target_path)
     # exit(42)
     base_path = 'c:\\!blockchains\\CoinJoin\\WasabiWallet_experiments\\mn1\\'
-    #all25_stats, all25 = full_analyze_as25_202405(base_path)
+
+    all38_stats = als.load_json_from_file(os.path.join(base_path, 'as38', 'as38_all_stats.json'))
+    all25_stats = als.load_json_from_file(os.path.join(base_path, 'as25', 'as25_all_stats.json'))
+    estimate_wallet_bounds(all25_stats, 'as25', 'lightcoral', all38_stats, 'as38', 'royalblue')
+
 
     all38_stats, all38 = full_analyze_as38_202503(base_path)
     all25_stats, all25 = full_analyze_as25_202405(base_path)
+    als.save_json_to_file_pretty(os.path.join(base_path, 'as38', 'as38_all_stats.json'), all38_stats)
+    als.save_json_to_file_pretty(os.path.join(base_path, 'as25', 'as25_all_stats.json'), all25_stats)
     all25_1m_stats, all25_1m = full_analyze_as25_202405_only1m(base_path)
     all25_2m_stats, all25_2m = full_analyze_as25_202405_only2m(base_path)
 
-    NUM_COLUMNS = 2  # 4
+    NARROW_FIGURES = True
+    NUM_COLUMNS = 3 if NARROW_FIGURES else 3
     NUM_ROWS = 6     # 5
     fig = plt.figure(figsize=(20, NUM_ROWS * 4))
     mfig = Multifig(plt, fig, NUM_ROWS, NUM_COLUMNS)
@@ -1006,6 +1124,7 @@ if __name__ == "__main__":
     mfig.plt.savefig(f'{save_file}.png', dpi=300)
     mfig.plt.savefig(f'{save_file}.pdf', dpi=300)
     mfig.plt.close()
+
 
     # base_path = 'c:\\!blockchains\\CoinJoin\\WasabiWallet_experiments\\mn1\\tmp\\'
     # merged = merge_coins_files(base_path, 'mix2_coins.json', 'mix2_coins_20240528.json')
