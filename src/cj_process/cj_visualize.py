@@ -2,15 +2,18 @@ import os
 from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
+from html import escape
 
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.dates as mdates
 import mpl_toolkits.axisartist as AA
 
 import numpy as np
 from scipy.optimize import minimize
 from scipy import stats
 
+import pandas as pd
 
 from cj_process.cj_consts import *
 from cj_process.cj_structs import *
@@ -508,6 +511,31 @@ def plot_whirlpool_coordinator_fees(mix_id: str, cjtxs_coordinator_fees: dict):
     plt.show()
 
 
+def plot_month_year_separators(new_month_indices, separators_to_plot, ax2):
+    # Plot lines as separators corresponding to months
+    for pos in new_month_indices:
+        if pos[0] in separators_to_plot:
+            PLOT_DAYS_MONTHS = False
+            if pos[0] == 'day' or pos[0] == 'month' and PLOT_DAYS_MONTHS:
+                ax2.axvline(x=pos[1], color='gray', linewidth=0.5, alpha=0.1, linestyle='--')
+            if pos[0] == 'year':
+                ax2.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.4, linestyle='--')
+    ax2.set_xticks([x[1] for x in new_month_indices])
+    labels = []
+    prev_year_offset = -10000
+    for x in new_month_indices:
+        if x[0] == 'year':
+            if x[1] - prev_year_offset > 1000:
+                labels.append(f'{x[2][0:4]}')
+                prev_year_offset = x[1]
+            else:
+                labels.append('')
+        else:
+            labels.append('')
+    ax2.set_xticklabels(labels, rotation=45, fontsize=6)
+
+
+
 def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str, sort_coinjoins_relative_order: bool,
                         analyze_values: bool = True, normalize_values: bool = True,
                         restrict_to_out_size = None, restrict_to_in_size = None,
@@ -598,7 +626,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             for i in range(1, len(dates)):
                 if dates[i].day != dates[i - 1].day:
                     new_day_indices.append(('day', i))
-            print(new_day_indices)
+            #print(new_day_indices)
             for pos in new_day_indices:
                 ax.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.2)
 
@@ -608,6 +636,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             else:
                 new_month_indices.append(('year', next_month_index, dir_name[0:7]))
             next_month_index += len(data["coinjoins"])  # Store index of start fo next month (right after last index of current month)
+            # TODO: if len(data["coinjoins"]) == 0, then month tick is plotted over previous one and is not visible
+            #    add some artificial space to improve visibility? Or add artificial empty coinjoin bar?
 
             # Detect transactions with no remixes on input/out or both
             no_remix = als.detect_no_inout_remix_txs(data["coinjoins"])
@@ -825,26 +855,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 ax3.tick_params(axis='y', colors='green')
 
             # Plot lines as separators corresponding to months
-            for pos in new_month_indices:
-                if pos[0] in separators_to_plot:
-                    PLOT_DAYS_MONTHS = False
-                    if pos[0] == 'day' or pos[0] == 'month' and PLOT_DAYS_MONTHS:
-                        ax2.axvline(x=pos[1], color='gray', linewidth=0.5, alpha=0.1, linestyle='--')
-                    if pos[0] == 'year':
-                        ax2.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.4, linestyle='--')
-            ax2.set_xticks([x[1] for x in new_month_indices])
-            labels = []
-            prev_year_offset = -10000
-            for x in new_month_indices:
-                if x[0] == 'year':
-                    if x[1] - prev_year_offset > 1000:
-                        labels.append(f'{x[2][0:4]}')
-                        prev_year_offset = x[1]
-                    else:
-                        labels.append('')
-                else:
-                    labels.append('')
-            ax2.set_xticklabels(labels, rotation=45, fontsize=6)
+            plot_month_year_separators(new_month_indices, separators_to_plot, ax2)
 
             # if ax:
             #     ax.legend(loc='center left')
@@ -909,6 +920,10 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
     all_data = als.load_coinjoins_from_file(target_load_path, None, True)
     sorted_cj_time = als.sort_coinjoins(all_data['coinjoins'], als.SORT_COINJOINS_BY_RELATIVE_ORDER)
 
+    if len(sorted_cj_time) < 2:
+        logging.warning(f'estimate_wallet_prediction_factor() - too little coinjoins available for {mix_id}, not continuing')
+        return []
+
     logging.debug(f'estimate_wallet_prediction_factor() going to estimate input factors for {mix_id}')
 
     num_all_inputs = np.array([len(all_data['coinjoins'][cj['txid']]['inputs']) for cj in sorted_cj_time])
@@ -924,6 +939,20 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
 
     ratios_list_every_cjtx = [num_all_inputs[offset] / (num_all_outputs[offset] / AVG_NUM_OUTPUTS) for offset in range(0, len(num_all_inputs))]  # Number of wallets in every
     ax.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
+
+    # Store index of coinjoins when it changes months/years
+    new_month_indices = []
+    next_month_index = 0
+    dates = sorted(
+        [precomp_datetime.strptime(all_data["coinjoins"][cjtx['txid']]['broadcast_time_virtual'], "%Y-%m-%d %H:%M:%S.%f") for cjtx in
+         sorted_cj_time])
+    for i in range(1, len(dates)):
+        if dates[i].month != dates[i - 1].month:
+            if dates[i].year == dates[i - 1].year:
+                new_month_indices.append(('month', next_month_index, f'{dates[i].year}-{dates[i].month:02}'))
+            else:
+                new_month_indices.append(('year', next_month_index, f'{dates[i].year}-{dates[i].month:02}'))
+        next_month_index = next_month_index + 1
 
     ratios_list = []
     WINDOW_LEN = 10
@@ -945,6 +974,9 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
              label=f'Average of L1 minimization, window={LARGE_AVG_WINDOW}', color='red', alpha=0.5, linewidth=2)
     ax.set_xlabel('coinjoin in time')
     ax.set_ylabel('inputs prediction factor')
+
+    # Plot explict time ticks instead of
+    plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
 
     #
     # Compute number of predicted wallets
@@ -987,6 +1019,7 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
         ax2.tick_params(axis='y', colors=COLOR_WALLETS_INPUTS)
 
     # Finalize graph
+    plt.subplots_adjust(bottom=0.15)
     ax.set_title(f'Wallets prediction factor variability: {mix_id}')
     ax.legend(loc='upper left')
     save_path = os.path.join(target_load_path, f'{mix_id}_inputs_prediction_factor_dynamics')
@@ -1549,3 +1582,284 @@ def plot_num_wallets(mix_id: str, data: dict, avg_input_ratio: dict, ax):
         ax.legend()
 
     return num_wallets_predicted
+
+
+def generate_liquidity_summary_html(coords: list, target_path: str):
+    """
+    Generate an embeddable HTML segment (no <html>/<head>/<body>) from a stats JSON.
+    Now merges Inputs per CoinJoin and Outputs per CoinJoin into a single tab.
+    """
+
+    def fmt_btc(x):
+        s = f"{float(x):.8f}".rstrip('0').rstrip('.')
+        return s
+
+    def safe(x):
+        return escape(str(x)) if x is not None else ""
+
+    def build_kv(key, value):
+        return f'<span class="kv"><span class="k">{safe(key)}</span><span class="v">{safe(value)}</span></span>'
+
+    def build_card(title, items):
+        return f'''
+        <div class="card">
+          <div class="card-title">{escape(title)}</div>
+          <div class="card-body">
+            {''.join(items)}
+          </div>
+        </div>
+        '''
+
+    for coord in coords:
+        pool_name = f'{coord[0]}_{coord[1]}' if len(coord[1]) > 0 else f'{coord[0]}'
+        load_path = os.path.join(target_path, f'liquidity_summary_{pool_name}.json')
+        print(f'Loading liquidity file {load_path}')
+        data = als.load_json_from_file(load_path)
+        if not data:
+            print(f'  {load_path} not loaded, continuing...')
+            continue
+
+        earliest_time = data.get("earliest_time")
+        latest_time = data.get("latest_time")
+        earliest_cjtx = data.get("earliest_cjtx")
+        latest_cjtx = data.get("latest_cjtx")
+        total_coinjoins = data.get("total_coinjoins")
+
+        min_inputs = data.get("min_inputs")
+        max_inputs = data.get("max_inputs")
+        avg_inputs = data.get("avg_inputs")
+        median_inputs = data.get("median_inputs")
+
+        min_outputs = data.get("min_outputs")
+        max_outputs = data.get("max_outputs")
+        avg_outputs = data.get("avg_outputs")
+        median_outputs = data.get("median_outputs")
+
+        total_fresh_inputs_value = data.get("total_fresh_inputs_value")
+        total_friends_inputs_value = data.get("total_friends_inputs_value")
+        total_unmoved_outputs_value = data.get("total_unmoved_outputs_value")
+        total_leaving_outputs_value = data.get("total_leaving_outputs_value")
+        total_nonstandard_leaving_outputs_value = data.get("total_nonstandard_leaving_outputs_value")
+        total_fresh_inputs_without_nonstandard_outputs_value = data.get(
+            "total_fresh_inputs_without_nonstandard_outputs_value")
+
+        ratios_keys = [
+            ("Fresh inputs / total inputs", data.get("ratio_fresh_inputs_2_total_inputs")),
+            ("Friends inputs / total inputs", data.get("ratio_friends_inputs_2_total_inputs")),
+            ("Leaving outputs / total outputs", data.get("ratio_leaving_outputs_2_total_outputs")),
+            ("Staying outputs / total outputs", data.get("ratio_staying_outputs_2_total_outputs")),
+            ("Staying / non-remix outputs", data.get("ratio_staying_outputs_2_nonremix_outputs")),
+            ("Remixed inputs / total (numbers)", data.get("ratio_remixed_inputs_2_total_inputs_numbers")),
+            ("Remixed inputs / total (values)", data.get("ratio_remixed_inputs_2_total_inputs_values")),
+        ]
+
+        period = ""
+        if earliest_time and latest_time:
+            #period = f"{safe(earliest_time)} — {safe(latest_time)}"
+            period = f'{safe(earliest_time)} <a href="https://mempool.space/tx/{earliest_cjtx}">(tx)</a> — {safe(latest_time)} <a href="https://mempool.space/tx/{latest_cjtx}">(tx)</a>'
+
+        # <h2>{coord[0]} — {coord[1]}</h2>
+        header_html = f'''
+        <div class="cjseg-header">
+          <div class="meta">Total coinjoins: <b>{safe(total_coinjoins)}</b></div>
+          <div class="meta">Period         : <b>{period}</b></div>
+        </div>
+        '''
+
+        # Build the combined IO panel (single tab)
+        inputs_line = f"{safe(min_inputs)} / {safe(round(avg_inputs, 1) if isinstance(avg_inputs, (int, float)) else avg_inputs)} / {safe(median_inputs)} / {safe(max_inputs)}"
+        outputs_line = f"{safe(min_outputs)} / {safe(round(avg_outputs, 1) if isinstance(avg_outputs, (int, float)) else avg_outputs)} / {safe(median_outputs)} / {safe(max_outputs)}"
+
+        io_panel_inner = f'''
+          <div class="io-grid">
+            <div class="io-col">
+              <div class="over">Inputs per CJ</div>
+              <div class="mono">{inputs_line}</div>
+              <div class="under">min / avg / median / max</div>
+            </div>
+            <div class="io-col">
+              <div class="over">Outputs per CJ</div>
+              <div class="mono">{outputs_line}</div>
+              <div class="under">min / avg / median / max</div>
+            </div>
+          </div>
+        '''
+
+        tabs_html = f'''
+        <div class="tabs" role="tablist" aria-label="Stats tabs">
+          <button class="tab active" role="tab" aria-selected="true" tabindex="0">Inputs &amp; Outputs</button>
+        </div>
+        <div class="tab-panels">
+          <div class="tab-panel show" role="tabpanel">
+            {io_panel_inner}
+          </div>
+        </div>
+        '''
+
+        ratio_items = [build_kv(k, v) for k, v in ratios_keys if v]
+        ratio_card = build_card("Key Ratios", ratio_items)
+
+        totals = []
+        if total_fresh_inputs_value is not None:
+            totals.append(build_kv("Fresh inputs (BTC)", fmt_btc(total_fresh_inputs_value)))
+        if total_friends_inputs_value is not None:
+            totals.append(build_kv("Friends inputs (BTC)", fmt_btc(total_friends_inputs_value)))
+        if total_unmoved_outputs_value is not None:
+            totals.append(build_kv("Unmoved outputs (BTC)", fmt_btc(total_unmoved_outputs_value)))
+        if total_leaving_outputs_value is not None:
+            totals.append(build_kv("Leaving outputs (BTC)", fmt_btc(total_leaving_outputs_value)))
+        if total_nonstandard_leaving_outputs_value is not None:
+            totals.append(build_kv("Nonstandard leaving (BTC)", fmt_btc(total_nonstandard_leaving_outputs_value)))
+        if total_fresh_inputs_without_nonstandard_outputs_value is not None:
+            totals.append(build_kv("Fresh inputs w/o nonstandard (BTC)",
+                                   fmt_btc(total_fresh_inputs_without_nonstandard_outputs_value)))
+
+        totals_card = build_card("Aggregate Values", totals) if totals else ""
+
+        css = '''
+        <style>
+        .cjseg { --fg:#111; --bg:#fff; --muted:#666; --line:#e5e7eb; --accent:#111; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color:var(--fg);}
+        .cjseg .cjseg-header { margin-bottom: 12px; }
+        .cjseg h2 { margin: 0; font-size: 1.35rem; font-weight: 700; line-height: 1.3; }
+        .cjseg .sub { color: var(--muted); margin-top: 2px; font-size: 0.9rem; }
+        .cjseg .meta { margin-top: 6px; font-size: 0.95rem; }
+        .cjseg .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 10px; }
+
+        /* Cards */
+        .cjseg .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg); }
+        .cjseg .card-title { font-weight: 600; margin-bottom: 6px; }
+        .cjseg .card-body { display: grid; gap: 4px; }
+        .cjseg .kv { display: flex; justify-content: space-between; gap: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.92rem; }
+        .cjseg .kv .k { color: var(--muted); }
+        .cjseg .kv .v { font-weight: 600; }
+
+        /* Tabs (single) */
+        .cjseg .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 10px 0 8px; }
+        .cjseg .tab { background: transparent; border: none; padding: 6px 8px; font-weight: 600; cursor: default; color: var(--fg); border-bottom: 2px solid var(--fg); }
+        .cjseg .tab-panels { margin-top: 4px; }
+        .cjseg .tab-panel { display: none; }
+        .cjseg .tab-panel.show { display: block; }
+
+        /* IO panel */
+        .cjseg .io-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 10px; }
+        .cjseg .io-col { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+        .cjseg .io-col .over { font-weight: 600; margin-bottom: 2px; }
+        .cjseg .io-col .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.98rem; }
+        .cjseg .io-col .under { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+
+        .cjseg .foot { margin-top: 8px; color: var(--muted); font-size: 0.85rem; }
+        @media (prefers-color-scheme: dark) {
+          .cjseg { --fg:#e5e7eb; --bg:#0b0b0b; --muted:#9aa0a6; --line:#2a2a2a; --accent:#e5e7eb; }
+          .cjseg .card { background: #121212; }
+          .cjseg .io-col { background: #121212; }
+        }
+        </style>
+        '''
+
+        html = f'''
+        <section class="cjseg" aria-label="Liquidity summary">
+          {css}
+          {header_html}
+
+          {tabs_html}
+
+          <div class="grid">
+            {ratio_card}
+            {totals_card}
+          </div>
+
+        </section>
+        '''.strip()
+        #          <div class="foot">Source: coordinator logs. Segment is self-contained and embeddable.</div>
+
+        out_path = os.path.join(target_path, f'{pool_name}.html')
+        with open(out_path, "w", encoding="utf-8") as out:
+            SM.print(f'Saving html export at {out_path}')
+            out.write(html)
+
+
+def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefix: str):
+    for coordinator, records in intercoord_ratios.items():
+        if len(records) == 0:
+            continue
+        # Convert nested dict into DataFrame
+        df = pd.DataFrame.from_dict(records, orient="index")
+        # Parse timestamps and sort
+        df["broadcast_time"] = pd.to_datetime(df["broadcast_time"])
+        df = df.sort_values("broadcast_time").reset_index(drop=True)
+
+        # Plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(df["broadcast_time"], df["out_ratio"], label="outputs", alpha=0.3)
+        plt.plot(df["broadcast_time"], df["in_ratio"], label="inputs", alpha=0.7)
+        plt.axhline(0.4, color="gray", linestyle="--", linewidth=1, label="threshold (0.4)")
+        ax = plt.gca()
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+        plt.xticks(rotation=30, ha="right")
+        plt.ylabel("ratio")
+        plt.title(f"'{coordinator}': intermixed ratio of inputs & outputs over time")
+        plt.legend()
+        plt.tight_layout()
+
+        plt.savefig(Path(target_path, f"{prefix}in_out_ratio_over_time__{coordinator}.png"), dpi=200, bbox_inches="tight")
+        #plt.savefig(Path(target_path, f"in_out_ratio_over_time__{coordinator}.pdf"), dpi=200, bbox_inches="tight")
+        plt.close()
+
+        coordinators = []
+        in_series = []
+        out_series = []
+        for coordinator, records in intercoord_ratios.items():
+            df = pd.DataFrame.from_dict(records, orient="index")
+            in_vals = pd.to_numeric(df["in_ratio"],
+                                    errors="coerce").dropna().tolist() if "in_ratio" in df.columns else []
+            out_vals = pd.to_numeric(df["out_ratio"],
+                                     errors="coerce").dropna().tolist() if "out_ratio" in df.columns else []
+            if len(in_vals) == 0 and len(out_vals) == 0:
+                continue
+            coordinators.append(coordinator)
+            in_series.append(in_vals if len(in_vals) > 0 else [float("nan")])
+            out_series.append(out_vals if len(out_vals) > 0 else [float("nan")])
+
+        M = len(coordinators)
+        if M == 0:
+            raise RuntimeError("No coordinators with in_ratio/out_ratio data found.")
+
+        base_positions = list(range(M))
+        offset = 0.15
+        in_positions = [bp - offset for bp in base_positions]
+        out_positions = [bp + offset for bp in base_positions]
+
+        plt.figure(figsize=(max(8, M * 0.9), 5))
+
+        bp_in = plt.boxplot(in_series, positions=in_positions, widths=0.25, patch_artist=True, showfliers=False)
+        for patch in bp_in["boxes"]:
+            patch.set(facecolor="#f28e2b")
+        for element in ["whiskers", "caps", "medians"]:
+            for line in bp_in[element]:
+                line.set(color="#6b6b6b", linewidth=1.2)
+
+        bp_out = plt.boxplot(out_series, positions=out_positions, widths=0.25, patch_artist=True, showfliers=False)
+        for patch in bp_out["boxes"]:
+            patch.set(facecolor="#4e79a7")
+
+        # Rotate labels 45 degrees
+        plt.xticks(base_positions, coordinators, rotation=45, ha="right")
+
+        for element in ["whiskers", "caps", "medians"]:
+            for line in bp_out[element]:
+                line.set(color="#6b6b6b", linewidth=1.2)
+
+        plt.xticks(base_positions, coordinators)
+        plt.ylabel("ratio")
+        plt.title("Ratio of intermixed inputs and outputs under same coordinator")
+
+        # Add dashed horizontal line at 0.4
+        plt.axhline(0.4, color="gray", linestyle="--", linewidth=1)
+
+        legend_handles = [bp_in["boxes"][0], bp_out["boxes"][0]]
+        plt.legend(legend_handles, ["inputs", "outputs"], loc="lower left")
+
+        plt.tight_layout()
+        plt.savefig(Path(target_path, f"{prefix}all_coordinators_in_out_boxplot.png"), dpi=200, bbox_inches="tight")
+        plt.close()

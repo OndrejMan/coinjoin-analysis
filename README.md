@@ -87,14 +87,16 @@ To perform one iteration of false positives detection (repeat until no new false
 ```
 parse_dumplings.py --cjtype ww2 --action detect_false_positives --target-path path_to_results
 ```
-#### 3.2. Inspect created file ```no_remix_txs.json``` containing *potential* false positives
+#### 3.2. Inspect created file ```no_remix_txs.json``` and ```no_remix_txs_ext.json``` (this file is enriched by name of identified coordinators or clusters) containing *potential* false positives
 
-The detected potential false positives need to be manually analyzed one by one. If confirmed to be a real false positive, the transaction id shall be placed into ```false_cjtxs.json``` file to be excluded from later analyses.  
+The detected potential false positives need to be manually analyzed one by one. If confirmed to be a real false positive, the transaction id shall be placed into ```false_cjtxs.json``` file to be excluded from later analyses. Rerun analysis after each step as by marking some transactions as false positives, additional ones can be identified (e.g., if tx1 is remixed by tx2 false positive, then next pass of analysis will mark tx1 as with no remix after tx2 is removed.) 
 Here are some tips for detection of false positives:
-  - 'both_reuse_0_70' tx are almost certainly false positives (too many addresses reused, default threshold is 70% of reused addresses, normal coinjoins have almost all addresses freshly generated). Put them all into false_cjtxs.json and rerun.
-  - 'both_noremix' txs are transactions with no input and no output connected to other known coinjoin transactions. Very likely a false positive, but it needs to be analyzed one by one to confirm. 
+  - 'both_reuse_0_70' txs are almost certainly false positives (too many addresses reused, default threshold is 70% of reused addresses, normal coinjoins have almost all addresses freshly generated). Put them all into false_cjtxs.json and rerun.
+  - 'outputs_address_reuse_0_70' txs are almost certainly false positives as standard coinjoin clients will not reuse addresses heavily. In rare cases, small number of address reuse can be present (e.g., due to  direct registration of output address in WW2's coinjoin pay feature), but it shall not reach the high threshold of 70%.
+  - 'inputs_address_reuse_0_70' txs are very likely false positives, but needs to be manually verified - in rare cases, new fresh mix inflows can be from previously reused addresses, but it shall not reach the high threshold of 70%. 
+  - 'both_noremix' txs are transactions with no input and no output connected to other known coinjoin transactions. Very likely a false positive, but it needs to be analyzed one by one to confirm. The exception are the transactions from a corodinator barely reaching the minimum number of inputs set during initial Dumplings scanning (e.g., 20), fluctating around this value. If previous and next coinjoin transactions are below this threshold, the middle transaction will seemingly have no remixes, despite being real coinjoin transaction (and not false positive).  
   - txs left in "inputs_noremix" after all are typically the starting cjtx of some pool (no previous coinjoin was executed).
-  - txs left in "outputs_noremix" are typically the last cjtx of some pool (either the pool closed and no longer produces transactions, or is the last mined cjtx(s) wrt Dumpling sync date)
+  - txs left in "outputs_noremix" are typically the last cjtx of some pool - either the pool closed and no longer produces transactions, or is the last mined cjtx(s) wrt Dumpling sync date. 
   - after false positives are confirmed (e.g., at https://mempool.space), put them into false_cjtxs.json 
 
 #### 3.3. Repeat the whole process again (=> smaller no_remix_txs.json). 

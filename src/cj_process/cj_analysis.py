@@ -1,9 +1,10 @@
 import os
 import subprocess
-from collections import Counter
+from collections import Counter, defaultdict
 import sqlite3
 import logging
 from pathlib import Path
+from typing import List
 
 #import msgpack
 import orjson
@@ -27,7 +28,14 @@ from cj_process.cj_consts import SATS_IN_BTC, VerboseTransactionInfoLineSeparato
 from cj_process.cj_structs import MIX_EVENT_TYPE, precomp_datetime, MIX_PROTOCOL, SM, CJ_LOG_TYPES, CJ_ALICE_TYPES
 
 
-SORT_COINJOINS_BY_RELATIVE_ORDER = True  # If True then relative ordering of transactions based on remix connections
+# Sorting option for transactions.
+# If False, then mining time of block with the transaction is used.
+# If True then relative ordering of transactions based on remix connections.
+# Important: SORT_COINJOINS_BY_RELATIVE_ORDER=True is causing reordering of transactions wrt their mining time
+#            (broadcast_time_virtual is used instead). This may cause unexpected (seemingly incorrect) situations like transactions being
+#            placed into previous month when splitting into monthly intervals is performed.
+SORT_COINJOINS_BY_RELATIVE_ORDER = True
+
 PERF_USE_COMPACT_CJTX_STRUCTURE = False  # If True, more compacted dictionary with coinjoin records is used
 PERF_USE_SHORT_TXID = False
 PERF_TX_SHORT_LEN = 16
@@ -38,7 +46,7 @@ def load_json_from_file(file_path: str | Path) -> dict:
         return orjson.loads(file.read())
 
 
-def save_json_to_file(file_path: str, data: dict):
+def save_json_to_file(file_path: str, data: dict | list):
     with open(file_path, "wb") as file:
         file.write(orjson.dumps(data))
 
@@ -67,6 +75,32 @@ def detect_no_inout_remix_txs(coinjoins):
     no_remix['both_noremix'] = {cjtx: coinjoins[cjtx]['broadcast_time'] for cjtx in noremix_txs}
     logging.warning(f'Txs with no input&output remix: {no_remix["both_noremix"]}')
     return no_remix
+
+
+def detect_stdenom_rbf_notap_onechange_txs(coinjoins):
+    hits = {'stdenom_rbf_notap_onechange': {}}
+    for cjtx in coinjoins.keys():
+        # Is RBF?
+        if coinjoins[cjtx].get('isRbf', 'unknown') == 'yes':
+            script_freq = coinjoins[cjtx].get('script_frequencies', None)
+
+            # Is zero Taproot?
+            isZeroTaproot = False
+            if script_freq:
+                if len(script_freq['inputs']) == 1 and script_freq['inputs'].get('TxWitnessV1Taproot', 0) == 0:
+                    #and len(script_freq['outputs']) == 1 and script_freq['outputs'].get('TxWitnessV1Taproot', 0) == 0):
+                    isZeroTaproot = True
+            if isZeroTaproot:
+
+                # Has exactly one change output?
+                output_denoms = [coinjoins[cjtx]['outputs'][index]['value'] for index in coinjoins[cjtx]['outputs'].keys()]
+                counts = Counter(output_denoms).values()
+                isExactlyOneChange = (min(counts, default=0) == 1) and (sum(c == 1 for c in counts) == 1)
+
+                if isExactlyOneChange:
+                    hits['stdenom_rbf_notap_onechange'][cjtx] = coinjoins[cjtx]['broadcast_time']
+
+    return hits
 
 
 def detect_address_reuse_txs(coinjoins, reuse_threshold: float):
@@ -622,12 +656,10 @@ def extract_interval(data: dict, start_date: str, end_date: str):
     interval_data = {}
     if SORT_COINJOINS_BY_RELATIVE_ORDER:
         interval_data['coinjoins'] = {txid: data['coinjoins'][txid] for txid in data['coinjoins'].keys()
-                                      if start_date < data['coinjoins'][txid][
-                                          'broadcast_time_virtual'] < end_date}
+                                      if start_date < data['coinjoins'][txid]['broadcast_time_virtual'] < end_date}
     else:
         interval_data['coinjoins'] = {txid: data['coinjoins'][txid] for txid in data['coinjoins'].keys()
-                                      if start_date < data['coinjoins'][txid][
-                                          'broadcast_time'] < end_date}
+                                      if start_date < data['coinjoins'][txid]['broadcast_time'] < end_date}
     interval_data['postmix'] = {}
     if 'rounds' in data.keys():
         interval_data['rounds'] = {roundid: data['rounds'][roundid] for roundid in data['rounds'].keys()
@@ -1261,7 +1293,6 @@ def extract_tx_info(txid: str, raw_txs: dict):
     :return: parsed transaction record
     """
 
-    # Use pre-loaded transactions if available
     tx_info = raw_txs[txid]
 
     input_addresses = {}
@@ -1379,4 +1410,33 @@ def streamline_coinjoins_structure(all_data:dict, compact_strong: bool=False):
             all_data['coinjoins'].pop(cjtx)
 
     return full_txid_mapping
+
+
+def analyze_coordinator_detection(cjtxs: dict, tx_list: dict, coords: List):
+    # Transform dictionary to {'coord': [cjtxs]} format
+    tx_list_t = defaultdict(list)
+    for key, value in tx_list.items():
+        tx_list_t[value].append(key)
+
+    # For given coordinator, compute statistics for all its transactions
+    intercoord_ratios = {}
+    for coord in coords:
+        intercoord_ratios[coord] = {}
+        # Compute ratio of in-coordinator remixes
+        # For each remixed input, check if it is coming form the same coordinator
+        for txid in tx_list_t[coord]:
+            if txid in cjtxs['coinjoins'].keys():
+                remix_inputs = [index for  index in cjtxs['coinjoins'][txid]['inputs'].keys() if cjtxs['coinjoins'][txid]['inputs'][index]['mix_event_type'] == 'MIX_REMIX']
+                remix_outputs = [index for  index in cjtxs['coinjoins'][txid]['outputs'].keys() if cjtxs['coinjoins'][txid]['outputs'][index]['mix_event_type'] == 'MIX_REMIX']
+                num_same_coord_inputs = sum([1 for index in remix_inputs
+                                             if 'spending_tx' in cjtxs['coinjoins'][txid]['inputs'][index]
+                                             and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['inputs'][index]['spending_tx'])[0], '-') == coord])
+                num_same_coord_outputs = sum([1 for index in remix_outputs
+                                              if 'spend_by_tx' in cjtxs['coinjoins'][txid]['outputs'][index]
+                                              and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['outputs'][index]['spend_by_tx'])[0], '-') == coord])
+                intercoord_ratios[coord][txid] = {'broadcast_time': cjtxs['coinjoins'][txid]['broadcast_time'],
+                                                 'in_ratio': num_same_coord_inputs / len(remix_inputs) if len(remix_inputs) > 0 else 0,
+                                                 'out_ratio': num_same_coord_outputs / len(remix_outputs) if len(remix_outputs) > 0 else 0}
+
+    return intercoord_ratios
 

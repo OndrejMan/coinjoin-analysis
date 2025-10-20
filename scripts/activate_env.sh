@@ -9,3 +9,4 @@ source $BASE_PATH/btc/coinjoin-analysis/venv/bin/activate
 # Go to analysis folder with scripts
 cd $BASE_PATH/btc/coinjoin-analysis/src
 
+echo "TMP_DIR=$TMP_DIR"

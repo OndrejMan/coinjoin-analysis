@@ -19,6 +19,7 @@ import pandas as pd
 import numpy as np
 from cj_process.cj_analysis import get_output_name_string, get_input_name_string
 from cj_process import cj_analysis as als
+from cj_process import cj_consts as cjc
 import argparse
 import gc
 import time
@@ -26,7 +27,7 @@ import ast
 import requests
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import List, BinaryIO
+from typing import List
 #import tracemalloc
 
 
@@ -129,10 +130,13 @@ def load_coinjoin_stats_from_dumplings_file(target_file: str, start_date: str = 
                 record['block_hash'] = block_hash
                 block_index = None if parts[2] is None else int(parts[2])
                 record['block_index'] = block_index
+                scripts_frequencies = {'inputs': {}, 'outputs': {}}
 
                 inputs = [input.strip('{') for input in parts[4].split(VerboseInOutInfoInLineSeparator)] if parts[4] else None
                 record['inputs'] = {}
+
                 index = 0
+                isRbf = 'unknown'
                 for input in inputs:
                     # Split to segments using - and + separators
                     segments_pipe = input.split("-")
@@ -145,6 +149,14 @@ def load_coinjoin_stats_from_dumplings_file(target_file: str, start_date: str = 
                     this_input['wallet_name'] = 'real_unknown'
                     this_input['script'] = segments[3]
                     this_input['script_type'] = segments[4].strip()
+                    scripts_frequencies['inputs'][this_input['script_type']] = scripts_frequencies['inputs'].get(this_input['script_type'], 0) + 1
+                    if len(segments) > 5:  # Older format had no 'sequence' value
+                        this_input['sequence'] = int(segments[5].strip())
+                        if isRbf != 'yes':  # Speedup - do not compute if we already known isRbf
+                            isRbf = 'no'  # set to no (was either unknown or already no)
+                            if isinstance(this_input['sequence'], int) and this_input['sequence'] < cjc.RBF_THRESHOLD:
+                                isRbf = 'yes'
+
                     # TODO: generate proper address from script, now replaced by synthetic
                     # BUGBUG: if segments[3], segments[1] is used, then incorrect synthetic address is generated in case
                     # of address resuse (cj_analysis.py", line 910) : AssertionError: Inconsistent value found for
@@ -157,6 +169,8 @@ def load_coinjoin_stats_from_dumplings_file(target_file: str, start_date: str = 
                     record['inputs'][f'{index}'] = this_input
                     index += 1
 
+                record['isRbf'] = isRbf
+
                 outputs = [output.strip('{') for output in parts[5].split(VerboseInOutInfoInLineSeparator)] if parts[5] else None
                 record['outputs'] = {}
                 index = 0
@@ -167,11 +181,15 @@ def load_coinjoin_stats_from_dumplings_file(target_file: str, start_date: str = 
                     this_output['wallet_name'] = 'real_unknown'
                     this_output['script'] = segments[1]
                     this_output['script_type'] = segments[2].strip()
+                    scripts_frequencies['outputs'][this_output['script_type']] = scripts_frequencies['outputs'].get(this_output['script_type'], 0) + 1
                     this_output['address'] = get_synthetic_address(tx_id, index)  # TODO: Compute proper address from script
                     #this_output['address'], this_output['script_type'] = als.get_address(this_output['script'])
 
                     record['outputs'][f'{index}'] = this_output
                     index += 1
+
+                # Store scripts frequencies
+                record['script_frequencies'] = scripts_frequencies
 
                 # Add this record as coinjoin
                 cj_stats[tx_id] = record
@@ -1464,10 +1482,14 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
     # Load false positives
     false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_path, 'false_cjtxs.json'))
 
-    no_remix_all = {'inputs_noremix': {}, 'outputs_noremix': {}, 'both_noremix': {},
+    # Detected false positives candidates. 3m_xxx contains subset of txs from last 3 months.
+    no_remix_all = {'recent__inputs_noremix': {}, 'recent__outputs_noremix': {}, 'recent__both_noremix': {},
+                    'recent__inputs_address_reuse': {}, 'recent__outputs_address_reuse': {},
+                    'recent__both_reuse': {}, 'recent__stdenom_rbf_notap_onechange': {},
+                    'inputs_noremix': {}, 'outputs_noremix': {}, 'both_noremix': {},
                     'inputs_address_reuse': {}, 'outputs_address_reuse': {},
                     'both_reuse': {}, 'specific_denoms_noremix_in': {}, 'specific_denoms_noremix_out':{},
-                    'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {}}
+                    'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {}, 'stdenom_rbf_notap_onechange': {}}
     for dir_name in files:
         target_base_path = os.path.join(target_path, dir_name)
         tx_json_file = os.path.join(target_base_path, f'{tx_file}')
@@ -1487,34 +1509,62 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
             no_remix = als.detect_no_inout_remix_txs(data["coinjoins"])
             for key in no_remix.keys():
                 no_remix_all[key].update(no_remix[key])
+                print(f'NO_REMIX {key}={len(no_remix_all[key])}')
 
             # Detect transactions with too many address reuse
             address_reuse = als.detect_address_reuse_txs(data["coinjoins"], REUSE_THRESHOLD)
             for key in address_reuse.keys():
                 no_remix_all[key].update(address_reuse[key])
+                print(f'ADDRESS_REUSE {key}={len(address_reuse[key])}')
+
+            # For all no_remix hits detect the RBF and Taproot usage
+            DETECT_STDDENOM_RBF_NOTAP_ONECHANGE = True
+            if DETECT_STDDENOM_RBF_NOTAP_ONECHANGE:
+                # Detect strange non-WW2 transactions strange: no Taproot, RBF and exactly 1 change output
+                stdenom_rbf_notap_onechange = als.detect_stdenom_rbf_notap_onechange_txs(data["coinjoins"])
+                for key in stdenom_rbf_notap_onechange.keys():
+                    no_remix_all[key].update(stdenom_rbf_notap_onechange[key])
+                    print(f'STDDENOM_RBF_NOTAP_ONECHANGE {key}={len(stdenom_rbf_notap_onechange[key])}')
 
             # Detect transactions with specific WW2-like input/output denominations and structure
-            strange_2025_cj = als.detect_specific_cj_denoms(data["coinjoins"], STRANGE_2025_CJ_DENOMS, STRANGE_2025_CJ_DENOMS_MIN_OCCURENCE, STRANGE_2025_CJ_TIMES_LEAST_FREQUENT)
-            print(f'Strange CJs: {len(strange_2025_cj["specific_denoms"].keys())}')
-            # Keep only these which are also no_remix
-            strange_2025_cj_noremix_in =  {'specific_denoms_noremix_in': {cjtx: strange_2025_cj['specific_denoms'][cjtx] for cjtx in strange_2025_cj['specific_denoms'].keys() if cjtx in no_remix['inputs_noremix'].keys()}}
-            strange_2025_cj_noremix_out = {'specific_denoms_noremix_out': {cjtx: strange_2025_cj['specific_denoms'][cjtx] for cjtx in strange_2025_cj['specific_denoms'].keys() if cjtx in no_remix['outputs_noremix'].keys()}}
-            strange_2025_cj_noremix_both = {'specific_denoms_noremix_both': {cjtx: strange_2025_cj['specific_denoms'][cjtx] for cjtx in strange_2025_cj['specific_denoms'].keys() if cjtx in no_remix['both_noremix'].keys()}}
-            strange_2025_cj_noremix_inorout = {}
-            strange_2025_cj_noremix_inorout['specific_denoms_noremix_inorout'] = copy.deepcopy(strange_2025_cj_noremix_in['specific_denoms_noremix_in'])
-            strange_2025_cj_noremix_inorout['specific_denoms_noremix_inorout'].update(strange_2025_cj_noremix_out['specific_denoms_noremix_out'])
-            print(f'Strange CJs noremix_in: {len(strange_2025_cj_noremix_in["specific_denoms_noremix_in"].keys())}')
-            print(f'Strange CJs noremix_out: {len(strange_2025_cj_noremix_out["specific_denoms_noremix_out"].keys())}')
-            print(f'Strange CJs noremix_both: {len(strange_2025_cj_noremix_both["specific_denoms_noremix_both"].keys())}')
-            print(f'Strange CJs noremix_inorout: {len(strange_2025_cj_noremix_inorout["specific_denoms_noremix_inorout"].keys())}')
-            for key in strange_2025_cj_noremix_in.keys():
-                no_remix_all[key].update(strange_2025_cj_noremix_in[key])
-            for key in strange_2025_cj_noremix_out.keys():
-                no_remix_all[key].update(strange_2025_cj_noremix_out[key])
-            for key in strange_2025_cj_noremix_both.keys():
-                no_remix_all[key].update(strange_2025_cj_noremix_both[key])
-            for key in strange_2025_cj_noremix_inorout.keys():
-                no_remix_all[key].update(strange_2025_cj_noremix_inorout[key])
+            DETECT_STRANGE_DENOMS = False
+            if DETECT_STRANGE_DENOMS:
+                strange_2025_cj = als.detect_specific_cj_denoms(data["coinjoins"], STRANGE_2025_CJ_DENOMS, STRANGE_2025_CJ_DENOMS_MIN_OCCURENCE, STRANGE_2025_CJ_TIMES_LEAST_FREQUENT)
+                print(f'Strange CJs: {len(strange_2025_cj["specific_denoms"].keys())}')
+                # Keep only these which are also no_remix
+                strange_2025_cj_noremix_in =  {'specific_denoms_noremix_in': {cjtx: strange_2025_cj['specific_denoms'][cjtx] for cjtx in strange_2025_cj['specific_denoms'].keys() if cjtx in no_remix['inputs_noremix'].keys()}}
+                strange_2025_cj_noremix_out = {'specific_denoms_noremix_out': {cjtx: strange_2025_cj['specific_denoms'][cjtx] for cjtx in strange_2025_cj['specific_denoms'].keys() if cjtx in no_remix['outputs_noremix'].keys()}}
+                strange_2025_cj_noremix_both = {'specific_denoms_noremix_both': {cjtx: strange_2025_cj['specific_denoms'][cjtx] for cjtx in strange_2025_cj['specific_denoms'].keys() if cjtx in no_remix['both_noremix'].keys()}}
+                strange_2025_cj_noremix_inorout = {}
+                strange_2025_cj_noremix_inorout['specific_denoms_noremix_inorout'] = copy.deepcopy(strange_2025_cj_noremix_in['specific_denoms_noremix_in'])
+                strange_2025_cj_noremix_inorout['specific_denoms_noremix_inorout'].update(strange_2025_cj_noremix_out['specific_denoms_noremix_out'])
+                print(f'Strange CJs noremix_in: {len(strange_2025_cj_noremix_in["specific_denoms_noremix_in"].keys())}')
+                print(f'Strange CJs noremix_out: {len(strange_2025_cj_noremix_out["specific_denoms_noremix_out"].keys())}')
+                print(f'Strange CJs noremix_both: {len(strange_2025_cj_noremix_both["specific_denoms_noremix_both"].keys())}')
+                print(f'Strange CJs noremix_inorout: {len(strange_2025_cj_noremix_inorout["specific_denoms_noremix_inorout"].keys())}')
+                for key in strange_2025_cj_noremix_in.keys():
+                    no_remix_all[key].update(strange_2025_cj_noremix_in[key])
+                for key in strange_2025_cj_noremix_out.keys():
+                    no_remix_all[key].update(strange_2025_cj_noremix_out[key])
+                for key in strange_2025_cj_noremix_both.keys():
+                    no_remix_all[key].update(strange_2025_cj_noremix_both[key])
+                for key in strange_2025_cj_noremix_inorout.keys():
+                    no_remix_all[key].update(strange_2025_cj_noremix_inorout[key])
+
+    # Pre-filter transactions from past 3 months only for easier human readability
+    recent_items_keys = ['inputs_noremix', 'outputs_noremix', 'both_noremix', 'inputs_address_reuse',
+                         'outputs_address_reuse', 'both_reuse', 'stdenom_rbf_notap_onechange']
+    now = datetime.now()
+    for item in recent_items_keys:
+        no_remix_all[f'recent__{item}'] = {key: no_remix_all[item][key] for key in no_remix_all[item].keys()
+                                      if (now - als.precomp_datetime.strptime(data['coinjoins'][key]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")) <= timedelta(days=30)}
+
+    # for item in no_remix_all.keys():
+    #     if item == '_recent':  # All others than _recent
+    #         continue
+    #     no_remix_all['_recent'][item] = {key: no_remix_all[item][key] for key in no_remix_all[item].keys()
+    #                                   if (now - als.precomp_datetime.strptime(data['coinjoins'][key]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")) <= timedelta(days=30)}
+
 
     # Add used threshold value into key value in dictionary
     reuse_threshold_string = f"{REUSE_THRESHOLD:.2f}".replace('.', '_')
@@ -2348,18 +2398,18 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
     else:
         coords = []
         if mix_protocol == CoinjoinType.WW2:
-            coords = [('wasabi2', 'zksnacks'), ('wasabi2', 'others'), ('wasabi2', 'kruw'), ('wasabi2', 'gingerwallet'),
-                      ('wasabi2', 'opencoordinator'), ('wasabi2', 'coinjoin_nl'), ('wasabi2', 'wasabicoordinator'),
-                      ('wasabi2', 'mega'), ('wasabi2', 'btip'), ('wasabi2', 'unknown_2024')]
+            coords = [('wasabi2', coord_name) for coord_name in cjc.WASABI2_COORD_NAMES_ALL]
+            coords.append(('wasabi2', ''))  # Add record or all coordinators together
         if mix_protocol == CoinjoinType.WW1:
             coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
         if mix_protocol == CoinjoinType.JM:
             coords = [('joinmarket', 'all')]
         for coord in coords:
-            cjtx_coord = als.load_coinjoins_from_file(os.path.join(target_path, f'{coord[0]}_{coord[1]}'), None, True)
-            SM.print(f'{coord[0]}_{coord[1]}')
-            liq_sum = als.print_liquidity_summary(cjtx_coord["coinjoins"], f'{coord[0]}_{coord[1]}')
-            als.save_json_to_file_pretty(os.path.join(target_path, f'liquidity_summary_{coord[0]}_{coord[1]}.json'), liq_sum)
+            mix_id = f'{coord[0]}_{coord[1]}' if len(coord[1]) > 0 else f'{coord[0]}'
+            cjtx_coord = als.load_coinjoins_from_file(os.path.join(target_path, f'{mix_id}'), None, True)
+            SM.print(f'{mix_id}')
+            liq_sum = als.print_liquidity_summary(cjtx_coord["coinjoins"], f'{mix_id}')
+            als.save_json_to_file_pretty(os.path.join(target_path, f'liquidity_summary_{mix_id}.json'), liq_sum)
 
 
 def discover_coordinators(cjtxs: dict, sorted_cjtxs: list, coord_txs: dict, in_or_out: str,
@@ -2620,44 +2670,13 @@ def wasabi_detect_coordinators_orig(mix_id: str, protocol: MIX_PROTOCOL, target_
         print(f'# Total non-small coordinators (min={MIN_COORD_CJTXS}): {len(coord_txs_filtered)}')
 
 
-def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path):
-    """
-    Detect propagation of remix outputs to identify separate coordinators. Is based on the assumption,
-    that coinjoins under same coordinator will have majority of remixed inputs from/to the same coordinator.
-    The method iteratively places coinjoin transaction into a cluster based on cluster of a majority of inputs/outputs,
-    combined with list of know ground truth mappings between transactions and known coordinators ('txid_coord.json').
-    The method is not fully automatic as outputs for a deceased coordinator typically join another coordinator eventually
-    and naive application of heuristic would results in overly aggresive merge of clusters (typically to a dominant one
-    at the times). Instead, candidate clusters are created and user analyst is expected to decide if ones not yet
-    attributed to specific coordinator are separate from known ones or not (see txid_coord_merge_candidates.json).
-    :param mix_id:
-    :param protocol:
-    :param target_path:
-    :return:
-    """
-    # Read, filter and sort coinjoin transactions
-    cjtxs = als.load_coinjoins_from_file(target_path, None, True)["coinjoins"]
-    ordering = als.compute_cjtxs_relative_ordering(cjtxs)
-    sorted_cjtxs = sorted(ordering, key=ordering.get)
-
-    # Load known coordinators (will be used as starting set to expand to additional transactions)
-    data = als.load_json_from_file(os.path.join(target_path, 'txid_coord.json'))  # Load known coordinators
-    ground_truth_known_coord_txs = {key:data[sublist][key] for sublist in data.keys() for key in data[sublist].keys()}
-
-    # Transform dictionary to {'coord': [cjtx]} format
-    transformed_dict = defaultdict(list)
-    for key, value in ground_truth_known_coord_txs.items():
-        transformed_dict[value].append(key)
-    initial_known_txs = dict(transformed_dict)
-    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_t.json'), initial_known_txs)  # Save transformed version for easier human lookup
-
+def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_known_coord_txs: dict, initial_known_txs: dict,
+                              MIN_COORD_CJTXS: int = 10, MIN_COORD_FRACTION: float = 0.4):
     # Establish coordinator ids using two-pass process:
     # 1. First pass: Count dominant, already existing coordinator for cjtx inputs.
     #    If not existing yet (-1), get new unique id (counter) and assign it for future processing
     # 2. Second pass: Perform second pass with coordinators with lower than MIN_COORD_CJTXS
     # First pass may misclassify coordinators if transactions are out of order.
-    MIN_COORD_CJTXS = 10
-    MIN_COORD_FRACTION = 0.4
 
     coord_txs = initial_known_txs
     last_num_coordinators = -1
@@ -2717,7 +2736,6 @@ def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path)
             input_dominant_coord = input_value_counts.most_common()[0]
             output_dominant_coord = output_value_counts.most_common()[0]
 
-
             if input_dominant_coord[0] != output_dominant_coord[0]:
                 print(f'Dominant coordinator inconsistency detected for {cjtx}: coord={input_dominant_coord[0]}:{input_dominant_coord[1]}x vs. coord={output_dominant_coord[0]}:{output_dominant_coord[1]}x')
                 print(f'  now set as {coord_ids[cjtx]}')
@@ -2737,8 +2755,10 @@ def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path)
     als.print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
     als.print_coordinators_counts(coord_txs, 2)
 
-    # Note: automated merging not performed, consult wasabi_detect_coordinators_orig.complete_bidirectional_closure() for such option
-
+    #
+    # Merging detected clusters to already known named coordinators
+    #
+    # Note: fully automated merging of complete whole clusters is NOT performed, consult wasabi_detect_coordinators_orig.complete_bidirectional_closure() for such option
     pair_cluster_index_2_coord_name = {}
     for cluster_index in coord_txs.keys():
         if cluster_index in pair_cluster_index_2_coord_name.keys():
@@ -2761,33 +2781,73 @@ def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path)
         if cluster_id in merge_candidates_dict["cluster_names"]:
             merge_candidates_dict["all_cluster_links"][f"{cluster_id}__{merge_candidates_dict['cluster_names'][cluster_id]}"] = merge_candidates_dict["all_cluster_links"].pop(cluster_id)
 
-
-    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_merge_candidates.json'), merge_candidates_dict)
-
-    coord_txs_to_save = coord_txs
-
-    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered.json'), coord_txs_to_save)
+    coord_txs_named = copy.deepcopy(coord_txs)
     for coord_id in pair_cluster_index_2_coord_name.keys():
-        if coord_id in coord_txs_to_save:
-            coord_txs_to_save[pair_cluster_index_2_coord_name[coord_id]] = coord_txs_to_save.pop(coord_id)
-    coord_txs_to_save_sorted = {}
-    for coord_id in coord_txs_to_save.keys():
-        without_date_sorted = [txid for txid in coord_txs_to_save[coord_id] if txid not in cjtxs.keys()]
-        with_date = [txid for txid in coord_txs_to_save[coord_id] if txid in cjtxs.keys()]
+        if coord_id in coord_txs_named:
+            coord_txs_named[pair_cluster_index_2_coord_name[coord_id]] = coord_txs_named.pop(coord_id)
+    coord_txs_named_sorted = {}
+    for coord_id in coord_txs_named.keys():
+        without_date_sorted = [txid for txid in coord_txs_named[coord_id] if txid not in cjtxs.keys()]
+        with_date = [txid for txid in coord_txs_named[coord_id] if txid in cjtxs.keys()]
         with_date_sorted = sorted(with_date, key=lambda x: cjtxs[x]['broadcast_time'])
-        coord_txs_to_save_sorted[coord_id] = without_date_sorted + with_date_sorted
-
-    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered_renamed.json'), coord_txs_to_save_sorted)
-    tx_to_coord_map = {txid:coord for coord in coord_txs_to_save.keys() for txid in coord_txs_to_save[coord]}
-    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_to_coord_discovered_renamed.json'), tx_to_coord_map)
+        coord_txs_named_sorted[coord_id] = without_date_sorted + with_date_sorted
 
     PRINT_FINAL = False
     if PRINT_FINAL:
-        als.print_coordinators_counts(coord_txs, 2)
-        coord_txs_filtered = {coord_id: coord_txs[coord_id] for coord_id in coord_txs.keys() if
-                              len(coord_txs[coord_id]) >= MIN_COORD_CJTXS}
+        als.print_coordinators_counts(coord_txs_named, 2)
+        coord_txs_filtered = {coord_id: coord_txs_named[coord_id] for coord_id in coord_txs_named.keys() if
+                              len(coord_txs_named[coord_id]) >= MIN_COORD_CJTXS}
         #print(coord_txs_filtered)
         print(f'# Total non-small coordinators (min={MIN_COORD_CJTXS}): {len(coord_txs_filtered)}')
+
+    return merge_candidates_dict, coord_txs, coord_txs_named, coord_txs_named_sorted
+
+
+def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path):
+    """
+    Detect propagation of remix outputs to identify separate coordinators. Is based on the assumption,
+    that coinjoins under same coordinator will have majority of remixed inputs from/to the same coordinator.
+    The method iteratively places coinjoin transaction into a cluster based on cluster of a majority of inputs/outputs,
+    combined with list of know ground truth mappings between transactions and known coordinators ('txid_coord.json').
+    The method is not fully automatic as outputs for a deceased coordinator typically join another coordinator eventually
+    and naive application of heuristic would results in overly aggresive merge of clusters (typically to a dominant one
+    at the times). Instead, candidate clusters are created and user analyst is expected to decide if ones not yet
+    attributed to specific coordinator are separate from known ones or not (see txid_coord_merge_candidates.json).
+    :param mix_id:
+    :param protocol:
+    :param target_path:
+    :return:
+    """
+    # Read, filter and sort coinjoin transactions
+    cjtxs = als.load_coinjoins_from_file(target_path, None, True)["coinjoins"]
+    ordering = als.compute_cjtxs_relative_ordering(cjtxs)
+    sorted_cjtxs = sorted(ordering, key=ordering.get)
+
+    # Load known coordinators (will be used as starting set to expand to additional transactions)
+    data = als.load_json_from_file(os.path.join(target_path, 'txid_coord.json'))  # Load known coordinators
+    ground_truth_known_coord_txs = {key:data[sublist][key] for sublist in data.keys() for key in data[sublist].keys()}
+
+    # Transform dictionary to {'coord': [cjtx]} format
+    transformed_dict = defaultdict(list)
+    for key, value in ground_truth_known_coord_txs.items():
+        transformed_dict[value].append(key)
+    initial_known_txs = dict(transformed_dict)
+    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_t.json'), initial_known_txs)  # Save transformed version for easier human lookup
+
+    #
+    # Run core detection
+    #
+    merge_candidates_dict, coord_txs_unnamed, coord_txs_named, coord_txs_named_sorted = run_coordinator_detection(
+        cjtxs, sorted_cjtxs, ground_truth_known_coord_txs, initial_known_txs
+    )
+
+    # Save results
+    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered.json'), coord_txs_unnamed)
+    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_merge_candidates.json'), merge_candidates_dict)
+    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered_renamed.json'), coord_txs_named_sorted)
+
+    tx_to_coord_map = {txid:coord for coord in coord_txs_named.keys() for txid in coord_txs_named[coord]}
+    als.save_json_to_file_pretty(os.path.join(target_path, 'txid_to_coord_discovered_renamed.json'), tx_to_coord_map)
 
 
 def parse_arguments(argv):
@@ -2865,6 +2925,7 @@ class DumplingsParseOptions:
     ANALYSIS_BYBIT_HACK = False
     ANALYSIS_OUTPUT_CLUSTERS = False
     ANALYSIS_WALLET_PREDICTION = False
+    ANALYZE_DETECT_COORDINATORS_ALG = False
 
     target_base_path = ''
     #interval_stop_date = '2024-10-10 00:00:07.000'  # Last date to be analyzed, e.g., 2024-10-10 00:00:07.000
@@ -2961,6 +3022,7 @@ class DumplingsParseOptions:
         self.ANALYSIS_BYBIT_HACK = False
         self.ANALYSIS_OUTPUT_CLUSTERS = False
         self.ANALYSIS_WALLET_PREDICTION = False
+        self.ANALYZE_DETECT_COORDINATORS_ALG = False
 
         self.PLOT_REMIXES_FLOWS = False
         self.PLOT_INTERMIX_FLOWS = False
@@ -3367,6 +3429,8 @@ def main(argv=None):
                                                 op.SAVE_BASE_FILES_JSON, False)
 
             mix_ids_default = WHIRLPOOL_POOL_NAMES_ALL
+            # Remove general 'whirlpool' folder with all pools together - it is already extracted
+            mix_ids_default.remove('whirlpool')
             # Force MIX_IDS subset if required
             mix_ids = mix_ids_default if op.MIX_IDS == "" else op.MIX_IDS
             # Split and process Whirlpool-based on pools
@@ -3659,18 +3723,53 @@ def main(argv=None):
         print_remix_stats(op.target_base_path)
 
     if op.ANALYSIS_LIQUIDITY:
+        # Analyze and save liquidity
         analyze_liquidity_summary(op.CJ_TYPE, target_path)
+
+        # Generate html fragment with liqudity for web
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            mix_ids = cjc.WASABI2_COORD_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
+            coords = [('wasabi2', coord_name) for coord_name in mix_ids]
+            coords.append(('wasabi2', ''))  # Add record or all coordinators together
+        if op.CJ_TYPE == CoinjoinType.WW1:
+            coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
+        if op.CJ_TYPE == CoinjoinType.JM:
+            coords = [('joinmarket', 'all')]
+        if op.CJ_TYPE == CoinjoinType.SW:
+            mix_ids = cjc.WHIRLPOOL_POOL_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
+            coords = [('whirlpool', coord_name[10:]) for coord_name in mix_ids]
+            print(coords)
+
+        cjvis.generate_liquidity_summary_html(coords, target_path)
 
     if op.ANALYSIS_OUTPUT_CLUSTERS:
         analyze_zksnacks_output_clusters('wasabi2', target_path)
 
     if op.ANALYSIS_WALLET_PREDICTION:
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_gingerwallet')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_opencoordinator')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_wasabicoordinator')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_kruw')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi2_zksnacks')
-        cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1')
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            mix_ids = [f'wasabi2_{coord}' for coord in cjc.WASABI2_COORD_NAMES_ALL] if op.MIX_IDS == "" else op.MIX_IDS
+            logging.info(f'Going to process following mixes: {mix_ids}')
+            for coord in mix_ids:
+                cjvis.estimate_wallet_prediction_factor(target_path, coord)
+        if op.CJ_TYPE == CoinjoinType.WW1:
+            cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
+
+    if op.ANALYZE_DETECT_COORDINATORS_ALG:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            # Load all coinjoins
+            cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2_others'), None, True)
+
+            tx_list = {'crawl': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))['crawl']}  # Load known coordinators
+            ground_truth_known_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
+            intercoord_ratios = als.analyze_coordinator_detection(cjtxs, ground_truth_known_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
+            als.save_json_to_file_pretty(os.path.join(target_path, f'crawl_intercoord_mix_ratios.json'), intercoord_ratios)
+            cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'crawl_')
+
+            tx_list = {'all': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json'))}  # Load known coordinators
+            assigned_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
+            intercoord_ratios = als.analyze_coordinator_detection(cjtxs, assigned_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
+            als.save_json_to_file_pretty(os.path.join(target_path, f'discovered_intercoord_mix_ratios.json'), intercoord_ratios)
+            cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'discovered_')
 
 
     print('### SUMMARY #############################')

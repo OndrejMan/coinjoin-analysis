@@ -16,8 +16,11 @@ python3 -m cj_process.parse_dumplings --cjtype ww2 --action plot_coinjoins --env
 # Run generation of multigraph plots for all coordinators (very time consuming)
 #python3 -m cj_process.parse_dumplings --cjtype ww2 --action plot_coinjoins --env_vars "PLOT_REMIXES_MULTIGRAPH=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
 
-# Another visualization graphs (older)
-python3 -m cj_process.parse_dumplings --cjtype ww2 --target-path $TMP_DIR/ --env_vars "VISUALIZE_ALL_COINJOINS_INTERVALS=True" | tee parse_dumplings.py.log
+# Another visualization graphs (older) - for WW2, it fails due to memory after ~70minutes
+#python3 -m cj_process.parse_dumplings --cjtype ww2 --target-path $TMP_DIR/ --env_vars "VISUALIZE_ALL_COINJOINS_INTERVALS=True" | tee parse_dumplings.py.log
+
+# Visualization of wallets predictions in time
+python3 -m cj_process.parse_dumplings --cjtype ww2 --env_vars "ANALYSIS_WALLET_PREDICTION=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
 
 
 

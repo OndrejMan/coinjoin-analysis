@@ -13,3 +13,5 @@ python3 -m cj_process.parse_dumplings --cjtype ww1 --action plot_coinjoins --tar
 # Run generation of multigraph plots (time consuming)
 #python3 -m cj_process.parse_dumplings --cjtype ww1 --action plot_coinjoins --env_vars "PLOT_REMIXES_MULTIGRAPH=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
 
+# Visualization of wallets predictions in time
+python3 -m cj_process.parse_dumplings --cjtype ww1 --env_vars "ANALYSIS_WALLET_PREDICTION=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
