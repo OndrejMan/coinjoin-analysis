@@ -1,3 +1,4 @@
+import math
 import os
 from collections import defaultdict
 from datetime import timedelta
@@ -1790,14 +1791,16 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
 
         # Plot
         plt.figure(figsize=(10, 5))
-        plt.plot(df["broadcast_time"], df["out_ratio"], label="outputs", alpha=0.3)
-        plt.plot(df["broadcast_time"], df["in_ratio"], label="inputs", alpha=0.7)
-        plt.axhline(0.4, color="gray", linestyle="--", linewidth=1, label="threshold (0.4)")
+        plt.plot(df["broadcast_time"], df["out_ratio"] * 100, label="outputs (same coordinator)", color='green', alpha=0.2)
+        plt.plot(df["broadcast_time"], df["in_ratio"] * 100, label="inputs (same coordinator)", color='green', alpha=0.7)
+        plt.plot(df["broadcast_time"], df["out_ratio_second"] * 100, label="outputs (second coordinator)", color='red', alpha=0.2)
+        plt.plot(df["broadcast_time"], df["in_ratio_second"] * 100, label="inputs (second coordinator)", color='red', alpha=0.7)
+        plt.axhline(40, color="gray", linestyle="--", linewidth=1, label="threshold (40%)")
         ax = plt.gca()
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
         plt.xticks(rotation=30, ha="right")
-        plt.ylabel("ratio")
+        plt.ylabel("% remix fraction")
         plt.title(f"'{coordinator}': intermixed ratio of inputs & outputs over time")
         plt.legend()
         plt.tight_layout()
@@ -1863,3 +1866,55 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
         plt.tight_layout()
         plt.savefig(Path(target_path, f"{prefix}all_coordinators_in_out_boxplot.png"), dpi=200, bbox_inches="tight")
         plt.close()
+
+
+def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_string: str, fn_string: str, filename: str):
+    # Prepare x-axis as sorted numeric keys
+    x_vals = sorted([int(k) for k in results.keys()])
+
+    # Determine coordinators from the first x entry
+    first_key = str(x_vals[0])
+    coordinators = sorted(list(results[first_key].keys()))
+
+    # Build series dict: {coordinator: {"fp": [...], "fn": [...]}} aligned to x_vals
+    #series = {c: {"fp": [], "fn": []} for c in coordinators}
+    series = {c: {fp_string: [], fn_string: []} for c in coordinators}
+
+    for x in x_vals:
+        x_str = str(x)
+        for c in coordinators:
+            # Remove offset given by very first value where 0% changes were applied
+            fp_offset = results["0"][c][fp_string][0]
+            fn_offset = results["0"][c][fn_string][0]
+
+            # Values are lists (single-element), extract safely with defaults
+            entry = results[x_str].get(c, {})
+            fp_list = entry.get(fp_string, [0])
+            fp_list = [v - fp_offset for v in fp_list]  # Remove potential offset from "no change" results
+            fn_list = entry.get(fn_string, [0])
+            fn_list = [v - fn_offset for v in fn_list]  # Remove potential offset from "no change" results
+
+            fp_val = np.average(fp_list) if isinstance(fp_list, list) and fp_list else 0
+            fn_val = np.average(fp_list) if isinstance(fn_list, list) and fn_list else 0
+            # fp_val = fp_list[0] if isinstance(fp_list, list) and fp_list else 0
+            # fn_val = fn_list[0] if isinstance(fn_list, list) and fn_list else 0
+            series[c][fp_string].append(fp_val)
+            series[c][fn_string].append(fn_val)
+
+    # Plot
+    plt.figure(figsize=(12, 7))
+    for c in coordinators:
+        # Solid for fp, dashed for fn, same color cycle by plotting and grabbing the color
+        # First plot fp and capture color from the created line
+        fp_line, = plt.plot(x_vals, series[c][fp_string], label=f"{c} {fp_string}")
+        # Use the same color for fn with dashed linestyle
+        plt.plot(x_vals, series[c][fn_string], linestyle="--", label=f"{c} {fn_string}", color=fp_line.get_color(), alpha=0.7)
+
+    plt.xlabel("Removed attributions (%)")
+    plt.ylabel("Count/ratio")
+    plt.title("Coordinator FP (solid) and FN (dashed) over x")
+    plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+    plt.legend(ncol=2, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(Path(target_path, filename), dpi=200, bbox_inches="tight")
+    plt.close()

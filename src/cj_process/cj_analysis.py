@@ -1428,15 +1428,40 @@ def analyze_coordinator_detection(cjtxs: dict, tx_list: dict, coords: List):
             if txid in cjtxs['coinjoins'].keys():
                 remix_inputs = [index for  index in cjtxs['coinjoins'][txid]['inputs'].keys() if cjtxs['coinjoins'][txid]['inputs'][index]['mix_event_type'] == 'MIX_REMIX']
                 remix_outputs = [index for  index in cjtxs['coinjoins'][txid]['outputs'].keys() if cjtxs['coinjoins'][txid]['outputs'][index]['mix_event_type'] == 'MIX_REMIX']
-                num_same_coord_inputs = sum([1 for index in remix_inputs
+
+                # Number of remixed inputs/outputs from the same coordinator
+                same_coord_inputs_txids = [(txid, cjtxs['coinjoins'][txid]['inputs'][index].get('burn_time', 0)) for index in remix_inputs
                                              if 'spending_tx' in cjtxs['coinjoins'][txid]['inputs'][index]
-                                             and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['inputs'][index]['spending_tx'])[0], '-') == coord])
-                num_same_coord_outputs = sum([1 for index in remix_outputs
+                                             and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['inputs'][index]['spending_tx'])[0], '-') == coord]
+                num_same_coord_inputs = len(same_coord_inputs_txids)
+                num_same_coord_inputs_burntime_sum = sum([math.log10(burn_time) for txid, burn_time in same_coord_inputs_txids])
+                same_coord_outputs_txids = [(txid, cjtxs['coinjoins'][txid]['outputs'][index].get('burn_time', 0)) for index in remix_outputs
                                               if 'spend_by_tx' in cjtxs['coinjoins'][txid]['outputs'][index]
-                                              and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['outputs'][index]['spend_by_tx'])[0], '-') == coord])
+                                              and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['outputs'][index]['spend_by_tx'])[0], '-') == coord]
+                num_same_coord_outputs = len(same_coord_outputs_txids)
+                num_same_coord_outputs_burntime_sum = sum([math.log10(burn_time) for txid, burn_time in same_coord_outputs_txids])
+
+                # Number of inputs from the other most common (!= same coord)
+                input_coords_txids = [(tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['inputs'][index]['spending_tx'])[0], '-'),
+                                       cjtxs['coinjoins'][txid]['inputs'][index].get('burn_time', 0)) for index in remix_inputs
+                                             if 'spending_tx' in cjtxs['coinjoins'][txid]['inputs'][index]]
+                output_coords_txids = [(tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['outputs'][index]['spend_by_tx'])[0], '-'),
+                                        cjtxs['coinjoins'][txid]['outputs'][index].get('burn_time', 0)) for index in remix_outputs
+                                             if 'spend_by_tx' in cjtxs['coinjoins'][txid]['outputs'][index]]
+                # get the highest count (0 if no valid coordinators remain)
+                input_coords_counts = Counter([coord for coord, burntime in input_coords_txids])
+                input_coords_others_filtered = {k: v for k, v in input_coords_counts.items() if k not in ('-', coord)}
+                input_max_count = max(input_coords_others_filtered.values(), default=0)
+                output_coords_counts = Counter([coord for coord, burntime in output_coords_txids])
+                output_coords_others_filtered = {k: v for k, v in output_coords_counts.items() if k not in ('-', coord)}
+                output_max_count = max(output_coords_others_filtered.values(), default=0)
+
+                # Store result
                 intercoord_ratios[coord][txid] = {'broadcast_time': cjtxs['coinjoins'][txid]['broadcast_time'],
                                                  'in_ratio': num_same_coord_inputs / len(remix_inputs) if len(remix_inputs) > 0 else 0,
-                                                 'out_ratio': num_same_coord_outputs / len(remix_outputs) if len(remix_outputs) > 0 else 0}
+                                                 'out_ratio': num_same_coord_outputs / len(remix_outputs) if len(remix_outputs) > 0 else 0,
+                                                 'in_ratio_second': input_max_count / len(remix_inputs) if len(remix_inputs) > 0 else 0,
+                                                 'out_ratio_second': output_max_count / len(remix_outputs) if len(remix_outputs) > 0 else 0}
 
     return intercoord_ratios
 
