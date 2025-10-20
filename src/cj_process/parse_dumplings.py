@@ -1995,7 +1995,7 @@ def wasabi2_extract_other_pools(selected_coords: list, data: dict, target_path: 
                 'stop_date': interval_stop_date,
                 'num_cjtxs': len(cjtx_coord)}
 
-        logging.info(f'Total cjtxs extracted for pool {coord_name}: {len(cjtx_coord)}')
+        SM.print(f'Total cjtxs extracted for pool {coord_name}: {len(cjtx_coord)}')
 
     return split_pools_info
 
@@ -3565,7 +3565,7 @@ def main(argv=None):
 
             coord_tx_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord_discovered_renamed.json'))
             selected_coords_default = ["kruw", "mega", "btip", "gingerwallet", "wasabicoordinator", "coinjoin_nl",
-                               "opencoordinator", "dragonordnance", "wasabist", "strange_2025", "unknown_2024"]
+                               "opencoordinator", "dragonordnance", "wasabist", "strange_2025", "unknown_2024_e85631", "unknown_2024_28ce7b"]
             # Force MIX_IDS subset if required
             selected_coords = selected_coords_default if op.MIX_IDS == "" else op.MIX_IDS
 
@@ -3650,7 +3650,7 @@ def main(argv=None):
             ww_plot_remixes_helper(['wasabi2_kruw', 'wasabi2_gingerwallet', 'wasabi2_opencoordinator',
                                     'wasabi2_coinjoin_nl', 'wasabi2_wasabicoordinator', 'wasabi2_wasabist',
                                     'wasabi2_dragonordnance', 'wasabi2_mega', 'wasabi2_btip', 'wasabi2_strange_2025',
-                                    'wasabi2_unknown_2024', 'wasabi2_others',
+                                    'wasabi2_unknown_2024_e85631', 'wasabi2_unknown_2024_28ce7b', 'wasabi2_others',
                                     'wasabi2_zksnacks', 'wasabi2'], MIX_PROTOCOL.WASABI2)
 
         if op.CJ_TYPE == CoinjoinType.SW:
@@ -3770,6 +3770,7 @@ def main(argv=None):
             intercoord_ratios = als.analyze_coordinator_detection(cjtxs, assigned_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
             als.save_json_to_file_pretty(os.path.join(target_path, f'discovered_intercoord_mix_ratios.json'), intercoord_ratios)
             cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'discovered_')
+
 
 
     print('### SUMMARY #############################')
