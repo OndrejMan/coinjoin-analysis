@@ -1591,7 +1591,7 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
     """
 
     def fmt_btc(x):
-        s = f"{float(x):.8f}".rstrip('0').rstrip('.')
+        s = f"{float(x):.2f}".rstrip('0').rstrip('.')
         return s
 
     def safe(x):
@@ -1701,18 +1701,18 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
 
         totals = []
         if total_fresh_inputs_value is not None:
-            totals.append(build_kv("Fresh inputs (BTC)", fmt_btc(total_fresh_inputs_value)))
+            totals.append(build_kv("Fresh inflows (BTC)", fmt_btc(total_fresh_inputs_value)))
         if total_friends_inputs_value is not None:
-            totals.append(build_kv("Friends inputs (BTC)", fmt_btc(total_friends_inputs_value)))
+            if total_fresh_inputs_without_nonstandard_outputs_value is not None:
+                totals.append(build_kv("Fresh inflows without nonstandard (BTC)",
+                                       fmt_btc(total_fresh_inputs_without_nonstandard_outputs_value)))
+            totals.append(build_kv("WW1/WW2 mix inflows (BTC)", fmt_btc(total_friends_inputs_value)))
         if total_unmoved_outputs_value is not None:
             totals.append(build_kv("Unmoved outputs (BTC)", fmt_btc(total_unmoved_outputs_value)))
         if total_leaving_outputs_value is not None:
             totals.append(build_kv("Leaving outputs (BTC)", fmt_btc(total_leaving_outputs_value)))
         if total_nonstandard_leaving_outputs_value is not None:
-            totals.append(build_kv("Nonstandard leaving (BTC)", fmt_btc(total_nonstandard_leaving_outputs_value)))
-        if total_fresh_inputs_without_nonstandard_outputs_value is not None:
-            totals.append(build_kv("Fresh inputs w/o nonstandard (BTC)",
-                                   fmt_btc(total_fresh_inputs_without_nonstandard_outputs_value)))
+            totals.append(build_kv("Nonstandard outputs leaving (BTC)", fmt_btc(total_nonstandard_leaving_outputs_value)))
 
         totals_card = build_card("Aggregate Values", totals) if totals else ""
 
