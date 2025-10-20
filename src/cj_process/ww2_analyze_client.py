@@ -1068,10 +1068,15 @@ def estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str, cj_stats2
         plt.plot(Ys, ci_hi_list, label=f"Upper bound ({prefix}) (CI=95%)", linestyle='-.', color=line_color, alpha=0.7)
         plt.plot(Ys, ci_lo_list, label=f"Lower bound ({prefix}) (CI=95%)", linestyle='--', color=line_color, alpha=0.7)
 
-    compute_and_plot(cj_stats1, 'num_inputs', color1, f'{prefix1}_in')
-    compute_and_plot(cj_stats1, 'num_outputs', 'coral', f'{prefix1}_out')
-    compute_and_plot(cj_stats2, 'num_inputs', color2, f'{prefix2}_in')
-    compute_and_plot(cj_stats2, 'num_outputs', 'darkblue', f'{prefix2}_out')
+
+    compute_and_plot(cj_stats1, 'num_inputs', 'red', f'{prefix1}_in')
+    compute_and_plot(cj_stats1, 'num_outputs', 'green', f'{prefix1}_out')
+    compute_and_plot(cj_stats2, 'num_inputs', 'blue', f'{prefix2}_in')
+    compute_and_plot(cj_stats2, 'num_outputs', 'yellow', f'{prefix2}_out')
+    # compute_and_plot(cj_stats1, 'num_inputs', color1, f'{prefix1}_in')
+    # compute_and_plot(cj_stats1, 'num_outputs', 'coral', f'{prefix1}_out')
+    # compute_and_plot(cj_stats2, 'num_inputs', color2, f'{prefix2}_in')
+    # compute_and_plot(cj_stats2, 'num_outputs', 'darkblue', f'{prefix2}_out')
 
     plt.xlabel("Number of coinjoin inputs/outputs")
     plt.ylabel("Estimated number of wallets")
