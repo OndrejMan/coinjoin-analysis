@@ -30,6 +30,7 @@ import requests
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List
+import multiprocessing as mp
 #import tracemalloc
 
 
@@ -2673,7 +2674,7 @@ def wasabi_detect_coordinators_orig(mix_id: str, protocol: MIX_PROTOCOL, target_
 
 
 def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_known_coord_txs: dict, initial_known_txs: dict,
-                              MIN_COORD_CJTXS: int = 10, MIN_COORD_FRACTION: float = 0.4):
+                              ASSERT_DUPLICATE_COORD_ASSIGNMENT = True, MIN_COORD_FRACTION: float = 0.4, MIN_COORD_CJTXS: int = 10):
     # Establish coordinator ids using two-pass process:
     # 1. First pass: Count dominant, already existing coordinator for cjtx inputs.
     #    If not existing yet (-1), get new unique id (counter) and assign it for future processing
@@ -2775,7 +2776,7 @@ def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_know
                     print(f'coord_ids: {cluster_index} paired to {ground_truth_known_coord_txs[txid]} by {txid}')
                     pair_cluster_index_2_coord_name[cluster_index] = ground_truth_known_coord_txs[txid]
                 else:
-                    ASSERT_DUPLICATE_COORD_ASSIGNMENT = False
+                    # For testing of robustness of coordinator detection, we need to disable this assert
                     if ASSERT_DUPLICATE_COORD_ASSIGNMENT:
                         assert pair_cluster_index_2_coord_name[cluster_index] == ground_truth_known_coord_txs[txid], \
                             f'Duplicate coordinator pairing detected for cluster {cluster_index}: {pair_cluster_index_2_coord_name[cluster_index]} vs. {ground_truth_known_coord_txs[txid]}'
@@ -2795,6 +2796,10 @@ def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_know
         with_date = [txid for txid in coord_txs_named[coord_id] if txid in cjtxs.keys()]
         with_date_sorted = sorted(with_date, key=lambda x: cjtxs[x]['broadcast_time'])
         coord_txs_named_sorted[coord_id] = without_date_sorted + with_date_sorted
+    # Add all not attributed transactions
+    all_attributed = [txid for coord_id in coord_txs_named_sorted for txid in coord_txs_named_sorted[coord_id]]
+    unattributed = [txid for txid in cjtxs.keys() if txid not in all_attributed]
+    coord_txs_named_sorted['unattributed'] = sorted(unattributed, key=lambda x: cjtxs[x]['broadcast_time'])
 
     PRINT_FINAL = False
     if PRINT_FINAL:
@@ -2854,7 +2859,7 @@ def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path)
     als.save_json_to_file_pretty(os.path.join(target_path, 'txid_to_coord_discovered_renamed.json'), tx_to_coord_map)
 
 
-def wasabi_detect_coordinators_evaluation(target_path, drop_range: list, DROP_RANDOM_TXS: bool):
+def UNUSED_wasabi_detect_coordinators_evaluation(target_path, drop_range: list, DROP_RANDOM_TXS: bool):
     """
     :param mix_id:
     :param protocol:
@@ -2888,11 +2893,13 @@ def wasabi_detect_coordinators_evaluation(target_path, drop_range: list, DROP_RA
         keep_prob = 1 - percent / 100
         return {x:initial_data[x] for x in initial_data.keys() if secrets.randbelow(10000) < int(10000 * keep_prob)}
 
-    def drop_last_fraction(initial_data: dict, percent: int):
+    def drop_last_fraction(initial_data: dict, percent: int, coord_to_drop: None):
         # Drops last percent of coinjoins for each coordinator
         if not 0 <= percent <= 100:
             raise ValueError("percent must be between 0 and 100")
         for coord in initial_data.keys():
+            if coord_to_drop is not None and coord != coord_to_drop:  # If provided, limit only given coordinator
+                continue
             keep_len = int((1 - percent / 100) * len(initial_data[coord]))
             initial_data[coord] = initial_data[coord][0:keep_len]
 
@@ -2902,58 +2909,374 @@ def wasabi_detect_coordinators_evaluation(target_path, drop_range: list, DROP_RA
     # otherwise last fraction fo txs for each coordinator is dropped
     #DROP_RANDOM_TXS = True
 
-    results = {}
     all_txs = {txid: None for coord in initial_known_txs.keys() for txid in initial_known_txs[coord]}
-    for drop_fraction in [0] + drop_range:  # Always run with zero modification to obtain baseline
-        print(f'Drop fraction = {drop_fraction}')
-        results[drop_fraction] = {coord_name: {'fp': [], 'fn': [], 'fp_ratio': [], 'fn_ratio': []} for coord_name in initial_known_txs.keys()}
-        if DROP_RANDOM_TXS:
-            NUM_EXP_REPEAT = 5  # Repeat experiment multiple times to capture average behavior (random dropping)
-        else:
-            NUM_EXP_REPEAT = 1  # No need for repeats if trailing drop_fraction of txs for each coordinator are dropped
 
-        for repeat in range(0, NUM_EXP_REPEAT):
-            # Drop classification for drop_fraction randomly selected values
-            drop_ground_truth_known_coord_txs = copy.deepcopy(ground_truth_known_coord_txs)
-            drop_initial_known_txs = copy.deepcopy(initial_known_txs)
+    for coord_to_test in transformed_dict.keys():
+        results = {}
+        for drop_fraction in [0] + drop_range:  # Always run with zero modification to obtain baseline
+            print(f'Drop fraction = {drop_fraction}')
+            results[drop_fraction] = {coord_name: {'fp': [], 'fn': [], 'fp_ratio': [], 'fn_ratio': []} for coord_name in initial_known_txs.keys()}
             if DROP_RANDOM_TXS:
-                drop_all_txs = drop_random_fraction(all_txs, drop_fraction)
-                # for txid in list(drop_ground_truth_known_coord_txs.keys()):
-                #     if txid not in drop_all_txs:
-                #         drop_ground_truth_known_coord_txs.pop(txid)
-                for coord_name in drop_initial_known_txs.keys():
-                    for i in range(len(drop_initial_known_txs[coord_name]) - 1, -1, -1):  # iterate backwards
-                        if drop_initial_known_txs[coord_name][i] not in drop_all_txs.keys():
-                            drop_initial_known_txs[coord_name].pop(i)
+                NUM_EXP_REPEAT = 5  # Repeat experiment multiple times to capture average behavior (random dropping)
             else:
-                drop_initial_known_txs = drop_last_fraction(drop_initial_known_txs, drop_fraction)
+                NUM_EXP_REPEAT = 1  # No need for repeats if trailing drop_fraction of txs for each coordinator are dropped
 
-            print(f'len before drop={len(ground_truth_known_coord_txs)}, after {len(drop_ground_truth_known_coord_txs)}')
-            # Run core detection
-            merge_candidates_dict, coord_txs_unnamed, coord_txs_named, coord_txs_named_sorted = run_coordinator_detection(
-                cjtxs, sorted_cjtxs, drop_ground_truth_known_coord_txs, drop_initial_known_txs
-            )
+            for repeat in range(0, NUM_EXP_REPEAT):
+                # Drop classification for drop_fraction randomly selected values
+                drop_ground_truth_known_coord_txs = copy.deepcopy(ground_truth_known_coord_txs)
+                drop_initial_known_txs = copy.deepcopy(initial_known_txs)
+                if DROP_RANDOM_TXS:
+                    drop_all_txs = drop_random_fraction(all_txs, drop_fraction)
+                    # for txid in list(drop_ground_truth_known_coord_txs.keys()):
+                    #     if txid not in drop_all_txs:
+                    #         drop_ground_truth_known_coord_txs.pop(txid)
+                    for coord_name in drop_initial_known_txs.keys():
+                        for i in range(len(drop_initial_known_txs[coord_name]) - 1, -1, -1):  # iterate backwards
+                            if drop_initial_known_txs[coord_name][i] not in drop_all_txs.keys():
+                                drop_initial_known_txs[coord_name].pop(i)
+                else:
+                    drop_initial_known_txs = drop_last_fraction(drop_initial_known_txs, drop_fraction, coord_to_test)
 
-            # Compute false positives and false negatives
-            for coord_name in initial_known_txs.keys():
-                FP = set(coord_txs_named_sorted.get(coord_name, [])) - set(initial_known_txs.get(coord_name, []))  # false positives
-                FN = set(initial_known_txs.get(coord_name, [])) - set(coord_txs_named_sorted.get(coord_name, []))  # false negatives
-                results[drop_fraction][coord_name]['fp'].append(len(FP))
-                results[drop_fraction][coord_name]['fn'].append(len(FN))
-                results[drop_fraction][coord_name]['fp_ratio'].append(len(FP) / len(initial_known_txs[coord_name]))
-                results[drop_fraction][coord_name]['fn_ratio'].append(len(FN) / len(initial_known_txs[coord_name]))
+                print(f'len before drop={len(ground_truth_known_coord_txs)}, after {len(drop_ground_truth_known_coord_txs)}')
+                # Run core detection
+                merge_candidates_dict, coord_txs_unnamed, coord_txs_named, coord_txs_named_sorted = run_coordinator_detection(
+                    cjtxs, sorted_cjtxs, drop_ground_truth_known_coord_txs, drop_initial_known_txs
+                )
 
-                #results[drop_fraction][coord_name]['fp_confusion'] = Counter()
-                coord_txs_named_sorted
+                # Compute false positives and false negatives
+                for coord_name in initial_known_txs.keys():
+                    FP = set(coord_txs_named_sorted.get(coord_name, [])) - set(initial_known_txs.get(coord_name, []))  # false positives
+                    FN = set(initial_known_txs.get(coord_name, [])) - set(coord_txs_named_sorted.get(coord_name, []))  # false negatives
+                    results[drop_fraction][coord_name]['fp'].append(len(FP))
+                    results[drop_fraction][coord_name]['fn'].append(len(FN))
+                    results[drop_fraction][coord_name]['fp_ratio'].append(len(FP) / len(initial_known_txs[coord_name]))
+                    results[drop_fraction][coord_name]['fn_ratio'].append(len(FN) / len(initial_known_txs[coord_name]))
 
-                print(f'  {coord_name}: fp={len(FP)}, fn={len(FN)}')
+                    print(f'  {coord_name}: fp={len(FP)}, fn={len(FN)}')
 
-        if drop_fraction % 10 == 0:
-            als.save_json_to_file_pretty(os.path.join(target_path, f'coord_discovery_analysis_{drop_fraction}.json'), results)
+            if drop_fraction % 10 == 0:
+                als.save_json_to_file_pretty(os.path.join(target_path, f'coord_discovery_analysis_{coord_to_test}_{drop_fraction}.json'), results)
 
-    als.save_json_to_file_pretty(os.path.join(target_path, 'coord_discovery_analysis.json'), results)
+        als.save_json_to_file_pretty(os.path.join(target_path, f'coord_discovery_analysis_{coord_to_test}.json'), results)
 
     return results
+
+
+# Kill internal thread storms in child processes
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+# --- GLOBALS to be shared (read-only) ---
+_CJTXS = None
+_SORTED_CJTXS = None
+_GROUND_TRUTH = None
+_INITIAL_KNOWN_TXS = None
+_ALL_TXS = None
+_TARGET_PATH = None  # only for saving JSON (safe)
+_EXPERIMENT_BASE_NAME = None
+
+def _init_globals_from_parent(cjtxs, sorted_cjtxs, ground_truth, initial_known, all_txs, target_path, experiment_base_name):
+    """Called in parent (POSIX fork will COW-share these)."""
+    global _CJTXS, _SORTED_CJTXS, _GROUND_TRUTH, _INITIAL_KNOWN_TXS, _ALL_TXS, _TARGET_PATH, _EXPERIMENT_BASE_NAME
+    _CJTXS = cjtxs
+    _SORTED_CJTXS = sorted_cjtxs
+    _GROUND_TRUTH = ground_truth
+    _INITIAL_KNOWN_TXS = initial_known
+    _ALL_TXS = all_txs
+    _TARGET_PATH = target_path
+    _EXPERIMENT_BASE_NAME = experiment_base_name
+
+
+def _spawn_initializer(target_path, sorted_cjtxs, initial_known_serial):
+    """
+    Windows / non-POSIX fallback: load heavy data once per process.
+    We avoid passing megabyte dicts per task.
+    """
+    global _CJTXS, _SORTED_CJTXS, _GROUND_TRUTH, _INITIAL_KNOWN_TXS, _ALL_TXS, _TARGET_PATH
+    _TARGET_PATH = target_path
+
+    # Recompute heavy-but-shared state once per process
+    _CJTXS = als.load_coinjoins_from_file(target_path, None, True)["coinjoins"]
+    _SORTED_CJTXS = sorted_cjtxs
+
+    _GROUND_TRUTH = als.load_json_from_file(
+        os.path.join(target_path, 'txid_coord.json')
+    )['crawl']
+
+    # initial_known_serial carries the pre-sorted lists (small enough)
+    _INITIAL_KNOWN_TXS = initial_known_serial
+    _ALL_TXS = {txid: None for coord in _INITIAL_KNOWN_TXS for txid in _INITIAL_KNOWN_TXS[coord]}
+
+
+# --- helpers (unchanged semantics) ---
+def drop_random_fraction_dict(initial_data: dict, percent: int):
+    if not 0 <= percent <= 100:
+        raise ValueError("percent must be between 0 and 100")
+    keep_prob = 1 - percent / 100
+    return {x: initial_data[x] for x in initial_data.keys()
+            if secrets.randbelow(10000) < int(10000 * keep_prob)}
+
+
+def drop_last_fraction_dict(initial_data: dict, percent: int, coord_to_drop: None):
+    if not 0 <= percent <= 100:
+        raise ValueError("percent must be between 0 and 100")
+    for coord in list(initial_data.keys()):
+        if coord_to_drop is not None and coord != coord_to_drop:
+            continue
+        keep_len = int((1 - percent / 100) * len(initial_data[coord]))
+        initial_data[coord] = initial_data[coord][0:keep_len]
+    return initial_data
+
+
+# --- worker uses ONLY GLOBALS; nothing heavy in args ---
+def _eval_drop_attributions_single_coord(coord_to_test, drop_range, DROP_RANDOM_TXS):
+    print(f"[coord={coord_to_test}] pid={os.getpid()} START")
+
+    baseline_coord_txs_named_sorted = {}
+    results = {}
+    base_num_unattr_txs = 0
+
+    for drop_fraction in [0] + drop_range:  # Always add 0 as baseline
+        print(f"[coord={coord_to_test}] drop={drop_fraction}")
+        coord_names = list(_INITIAL_KNOWN_TXS.keys()) + ['unattributed']
+        results[drop_fraction] = {
+            coord_name: {'fp': [], 'fn': [], 'fp_ratio': [], 'fn_ratio': []}
+            for coord_name in coord_names
+        }
+        NUM_EXP_REPEAT = 5 if DROP_RANDOM_TXS else 1  # If randomized, run it x times, otherwise deterministic => run just once
+
+        for _ in range(NUM_EXP_REPEAT):
+            # Prepare structires for modification (dropping certain attributions)
+            drop_ground_truth_known_coord_txs = copy.deepcopy(_GROUND_TRUTH)
+            drop_initial_known_txs = copy.deepcopy(_INITIAL_KNOWN_TXS)
+
+            if DROP_RANDOM_TXS:
+                drop_all_txs = {txid: None for txid in drop_random_fraction_dict(_ALL_TXS, drop_fraction).keys()}
+                for coord_name in list(drop_initial_known_txs.keys()):
+                    for i in range(len(drop_initial_known_txs[coord_name]) - 1, -1, -1):
+                        if drop_initial_known_txs[coord_name][i] not in drop_all_txs:
+                            drop_initial_known_txs[coord_name].pop(i)
+            else:
+                drop_initial_known_txs = drop_last_fraction_dict(
+                    drop_initial_known_txs, drop_fraction, coord_to_drop=coord_to_test
+                )
+
+            # Core detection (READS globals)
+            _, _, _, coord_txs_named_sorted = run_coordinator_detection(
+                _CJTXS, _SORTED_CJTXS, drop_ground_truth_known_coord_txs, drop_initial_known_txs, False
+            )
+
+            # For baseline, store initial state with no modifications and ignore these values for FP and FN computation
+            # Rationale: we do not have complete ground truth for whole inspected interval => missing txs classified
+            #   as FP even for the no-modifications case (drop_fraction == 0). We therefore substract these specific
+            #   transactions when computing FP and FN stats
+            if drop_fraction == 0:
+                for coord_name in _INITIAL_KNOWN_TXS.keys():
+                    baseline_coord_txs_named_sorted[coord_name] = {}
+                    gt = set(_INITIAL_KNOWN_TXS.get(coord_name, []))  # ground truth
+                    pred = set(coord_txs_named_sorted.get(coord_name, []))  # predictions
+                    baseline_coord_txs_named_sorted[coord_name]['fp_list'] = pred - gt
+                    baseline_coord_txs_named_sorted[coord_name]['fn_list'] = gt - pred
+
+            # Compute false positives and false negatives for current experiment
+            for coord_name in _INITIAL_KNOWN_TXS.keys():
+                gt = set(_INITIAL_KNOWN_TXS.get(coord_name, []))  # ground truth
+                pred = set(coord_txs_named_sorted.get(coord_name, []))  # predictions
+                FP = pred - gt
+                FN = gt - pred
+                # Correct for unattributed transactions from "drop_fraction == 0" case
+                FP = [txid for txid in FP if txid not in baseline_coord_txs_named_sorted[coord_name]['fp_list']]
+                FN = [txid for txid in FP if txid not in baseline_coord_txs_named_sorted[coord_name]['fn_list']]
+                denom = max(1, len(_INITIAL_KNOWN_TXS[coord_name]))
+                # Now compute and store results
+                results[drop_fraction][coord_name]['fp'].append(len(FP))
+                results[drop_fraction][coord_name]['fn'].append(len(FN))
+                results[drop_fraction][coord_name]['fp_ratio'].append((len(FP) / denom) * 100)
+                results[drop_fraction][coord_name]['fn_ratio'].append((len(FN) / denom) * 100)
+
+            # Compute synthetic result for unattributed transactions
+            unattr = len(coord_txs_named_sorted.get('unattributed', []))
+            results[drop_fraction]['unattributed']['fp'].append(unattr)
+            results[drop_fraction]['unattributed']['fn'].append(0)
+            results[drop_fraction]['unattributed']['fp_ratio'].append((unattr / len(_CJTXS.keys())) * 100)
+            results[drop_fraction]['unattributed']['fn_ratio'].append(0)
+
+        # periodic save
+        if drop_fraction % 10 == 0:
+            als.save_json_to_file_pretty(
+                os.path.join(_TARGET_PATH, f"{coord_to_test}_{_EXPERIMENT_BASE_NAME}_{drop_fraction}{'_random' if DROP_RANDOM_TXS else ''}.json"),
+                results
+            )
+
+    # final save per coord
+    als.save_json_to_file_pretty(
+        os.path.join(_TARGET_PATH, f"{coord_to_test}_{_EXPERIMENT_BASE_NAME}{'_random' if DROP_RANDOM_TXS else ''}.json"),
+        results
+    )
+
+    print(f"[coord={coord_to_test}] pid={os.getpid()} DONE")
+    return coord_to_test, results
+
+
+# --- worker uses ONLY GLOBALS; nothing heavy in args ---
+def _eval_detection_threshold_single_coord(coord_to_test, threshold_range, unused: bool):
+    print(f"[coord={coord_to_test}] pid={os.getpid()} START")
+
+    # default baseline threshold value established based on intermix ratios of ground truth transactions
+    BASELINE_INTERMIX_THRESHOLD = 0.4
+
+    baseline_coord_txs_named_sorted = {}
+    results = {}
+    base_num_unattr_txs = 0
+    for intermix_threshold in [BASELINE_INTERMIX_THRESHOLD] + threshold_range:
+        print(f"[coord={coord_to_test}] intermix threshold={intermix_threshold}")
+        coord_names = list(_INITIAL_KNOWN_TXS.keys()) + ['unattributed']
+        results[intermix_threshold] = {
+            coord_name: {'fp': [], 'fn': [], 'fp_ratio': [], 'fn_ratio': []}
+            for coord_name in coord_names
+        }
+
+        # Core detection (READS globals)
+        _, _, _, coord_txs_named_sorted = run_coordinator_detection(
+            _CJTXS, _SORTED_CJTXS, _GROUND_TRUTH, _INITIAL_KNOWN_TXS, False, intermix_threshold
+        )
+
+        # For baseline, store initial state with no modifications and ignore these values for FP and FN computation
+        # Rationale: we do not have complete ground truth for whole inspected interval => missing txs classified
+        #   as FP even for the no-modifications case (intermix_threshold == BASELINE_INTERMIX_THRESHOLD). We therefore substract these specific
+        #   transactions when computing FP and FN stats
+        if intermix_threshold == BASELINE_INTERMIX_THRESHOLD:
+            for coord_name in _INITIAL_KNOWN_TXS.keys():
+                baseline_coord_txs_named_sorted[coord_name] = {}
+                gt = set(_INITIAL_KNOWN_TXS.get(coord_name, []))  # ground truth
+                pred = set(coord_txs_named_sorted.get(coord_name, []))  # predictions
+                baseline_coord_txs_named_sorted[coord_name]['fp_list'] = pred - gt
+                baseline_coord_txs_named_sorted[coord_name]['fn_list'] = gt - pred
+
+        # Compute false positives and false negatives for current experiment
+        for coord_name in _INITIAL_KNOWN_TXS.keys():
+            gt = set(_INITIAL_KNOWN_TXS.get(coord_name, []))  # ground truth
+            pred = set(coord_txs_named_sorted.get(coord_name, []))  # predictions
+            FP = pred - gt
+            FN = gt - pred
+            # Correct for unattributed transactions from "intermix_threshold == BASELINE_INTERMIX_THRESHOLD" case
+            FP = [txid for txid in FP if txid not in baseline_coord_txs_named_sorted[coord_name]['fp_list']]
+            FN = [txid for txid in FN if txid not in baseline_coord_txs_named_sorted[coord_name]['fn_list']]
+            denom = max(1, len(_INITIAL_KNOWN_TXS[coord_name]))
+            # Now compute and store results
+            results[intermix_threshold][coord_name]['fp'].append(len(FP))
+            results[intermix_threshold][coord_name]['fn'].append(len(FN))
+            results[intermix_threshold][coord_name]['fp_ratio'].append((len(FP) / denom) * 100)
+            results[intermix_threshold][coord_name]['fn_ratio'].append((len(FN) / denom) * 100)
+
+        # Compute synthetic result for unattributed transactions
+        unattr = len(coord_txs_named_sorted.get('unattributed', []))
+        results[intermix_threshold]['unattributed']['fp'].append(unattr)
+        results[intermix_threshold]['unattributed']['fn'].append(0)
+        results[intermix_threshold]['unattributed']['fp_ratio'].append((unattr / len(_CJTXS.keys())) * 100)
+        results[intermix_threshold]['unattributed']['fn_ratio'].append(0)
+
+        # periodic save
+        als.save_json_to_file_pretty(
+            os.path.join(_TARGET_PATH, f"{coord_to_test}_{_EXPERIMENT_BASE_NAME}_{intermix_threshold}.json"),
+            results
+        )
+
+    # final save per coord
+    als.save_json_to_file_pretty(
+        os.path.join(_TARGET_PATH, f"{coord_to_test}_{_EXPERIMENT_BASE_NAME}.json"),
+        results
+    )
+
+    print(f"[coord={coord_to_test}] pid={os.getpid()} DONE")
+    return coord_to_test, results
+
+
+def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, variable_range: list,
+                                                   DROP_RANDOM_TXS: bool, experiment_base_name: str):
+    """
+    Parallel version with memory-friendly sharing:
+    - POSIX: 'fork' -> copy-on-write sharing of big read-only dicts.
+    - Non-POSIX: 'spawn' -> per-process init (no per-task copies). Memory heavy.
+    """
+    # Precompute once in parent
+    cjtxs = als.load_coinjoins_from_file(target_path, None, True)["coinjoins"]
+    ordering = als.compute_cjtxs_relative_ordering(cjtxs)
+    sorted_cjtxs = sorted(ordering, key=ordering.get)
+
+    ground_truth_known_coord_txs = als.load_json_from_file(
+        os.path.join(target_path, 'txid_coord.json')
+    )['crawl']
+
+    # Build {'coord': [txids]} with deterministic ordering
+    transformed_dict = defaultdict(list)
+    for txid, coord in ground_truth_known_coord_txs.items():
+        transformed_dict[coord].append(txid)
+    order_map = {v: i for i, v in enumerate(sorted_cjtxs)}
+    for coord in transformed_dict.keys():
+        txs_sorted = sorted(
+            enumerate(transformed_dict[coord]),
+            key=lambda t: (0, order_map[t[1]]) if t[1] in order_map else (1, t[0])
+        )
+        transformed_dict[coord] = [v for _, v in txs_sorted]
+    initial_known_txs = dict(transformed_dict)
+
+    all_txs = {txid: None for coord in initial_known_txs for txid in initial_known_txs[coord]}
+
+    # Initialize globals in parent (used by fork)
+    _init_globals_from_parent(
+        cjtxs, sorted_cjtxs, ground_truth_known_coord_txs, initial_known_txs, all_txs, target_path, experiment_base_name
+    )
+
+    coordinators_names = list(initial_known_txs.keys())
+    combined_results = {}
+
+    # Choose best context for memory
+    if os.name == "posix":
+        # Fork gives true COW sharing of already-loaded globals
+        ctx = mp.get_context("fork")
+        initializer = None
+        initargs = ()
+    else:
+        # Windows / others: no COW. Load once per process via initializer.
+        ctx = mp.get_context("spawn")
+        initializer = _spawn_initializer
+        # Pass only light args; child reloads heavy data from disk one time
+        initargs = (target_path, sorted_cjtxs, initial_known_txs)
+
+    with ProcessPoolExecutor(
+            mp_context=ctx,
+            max_workers=os.cpu_count(),
+            initializer=initializer,
+            initargs=initargs
+    ) as ex:
+        futures = [ex.submit(worker_name, coord, variable_range, DROP_RANDOM_TXS) for coord in coordinators_names]
+        for fut in as_completed(futures):
+            k, res = fut.result()
+            combined_results[k] = res
+
+    # Save combined results
+    als.save_json_to_file_pretty(
+        os.path.join(_TARGET_PATH, f"all_{experiment_base_name}{'_random' if DROP_RANDOM_TXS else ''}.json"),
+        combined_results
+    )
+
+    # Plot results
+    for coord in coordinators_names:
+        file_path = os.path.join(target_path, f"{coord}_{experiment_base_name}{'_random' if DROP_RANDOM_TXS else ''}.json")
+        if os.path.exists(file_path):
+            results = als.load_json_from_file(file_path)
+            cjviz.plot_coord_attribution_stats(results, target_path, "fp", "fn",
+                                               f"{coord}_{experiment_base_name}_nominal.png")
+            cjviz.plot_coord_attribution_stats(results, target_path, "fp_ratio",
+                                                   "fn_ratio", f"{coord}_{experiment_base_name}_ratio.png")
+        else:
+            logging.warning(f'File {file_path} does not exists')
+
+    return combined_results
+
 
 
 def parse_arguments(argv):
@@ -3865,6 +4188,7 @@ def main(argv=None):
             # Load all coinjoins
             cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2_others'), None, True)
 
+            # Analyze intermix coordinator stats
             tx_list = {'crawl': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))['crawl']}  # Load known coordinators
             ground_truth_known_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
             intercoord_ratios = als.analyze_coordinator_detection(cjtxs, ground_truth_known_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
@@ -3876,6 +4200,21 @@ def main(argv=None):
             intercoord_ratios = als.analyze_coordinator_detection(cjtxs, assigned_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
             als.save_json_to_file_pretty(os.path.join(target_path, f'discovered_intercoord_mix_ratios.json'), intercoord_ratios)
             cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'discovered_')
+
+    if op.ANALYZE_DETECT_COORDINATORS_ALG_DETAILED:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            # Drop fraction of trailing transactions from ground truth attribution
+            wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'), _eval_drop_attributions_single_coord,
+                list(range(0, 101, 1)), False, 'coord_discovery_analysis')
+            # Drop random transactions from ground truth attribution
+            wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'), _eval_drop_attributions_single_coord,
+                list(range(0, 101, 3)), True, 'coord_discovery_analysis')
+            # Analyze impact of threshold for intermix attributions
+            wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'), _eval_drop_attributions_single_coord,
+                list(np.linspace(0.1, 0.9, 20)), False, 'coord_discovery_analysis_threshold')
 
 
 

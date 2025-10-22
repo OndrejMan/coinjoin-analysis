@@ -1869,12 +1869,22 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
 
 
 def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_string: str, fn_string: str, filename: str):
-    # Prepare x-axis as sorted numeric keys
-    x_vals = sorted([int(k) for k in results.keys()])
+    def _to_float_or_die(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"Non-numeric key in results: {v!r}")
 
-    # Determine coordinators from the first x entry
-    first_key = str(x_vals[0])
-    coordinators = sorted(list(results[first_key].keys()))
+    # Build (numeric_value, original_key) pairs and sort by the numeric value
+    _key_pairs = sorted(((_to_float_or_die(k), k) for k in results.keys()),
+                        key=lambda t: t[0])
+
+    # Use numeric values for the x-axis
+    x_vals = [num for num, _orig in _key_pairs]
+
+    # Use the original (unmodified) key to access the dict
+    first_original_key = _key_pairs[0][1]
+    coordinators = sorted(results[first_original_key].keys())
 
     # Build series dict: {coordinator: {"fp": [...], "fn": [...]}} aligned to x_vals
     #series = {c: {"fp": [], "fn": []} for c in coordinators}
@@ -1884,15 +1894,18 @@ def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_stri
         x_str = str(x)
         for c in coordinators:
             # Remove offset given by very first value where 0% changes were applied
-            fp_offset = results["0"][c][fp_string][0]
-            fn_offset = results["0"][c][fn_string][0]
+            REMOVE_OFFSET = False
+            if REMOVE_OFFSET:
+                fp_offset = results["0"][c][fp_string][0]
+                fn_offset = results["0"][c][fn_string][0]
 
             # Values are lists (single-element), extract safely with defaults
             entry = results[x_str].get(c, {})
             fp_list = entry.get(fp_string, [0])
-            fp_list = [v - fp_offset for v in fp_list]  # Remove potential offset from "no change" results
             fn_list = entry.get(fn_string, [0])
-            fn_list = [v - fn_offset for v in fn_list]  # Remove potential offset from "no change" results
+            if REMOVE_OFFSET:
+                fp_list = [v - fp_offset for v in fp_list]  # Remove potential offset from "no change" ("0") results
+                fn_list = [v - fn_offset for v in fn_list]  # Remove potential offset from "no change" ("0") results
 
             fp_val = np.average(fp_list) if isinstance(fp_list, list) and fp_list else 0
             fn_val = np.average(fp_list) if isinstance(fn_list, list) and fn_list else 0
@@ -1911,8 +1924,8 @@ def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_stri
         plt.plot(x_vals, series[c][fn_string], linestyle="--", label=f"{c} {fn_string}", color=fp_line.get_color(), alpha=0.7)
 
     plt.xlabel("Removed attributions (%)")
-    plt.ylabel("Count/ratio")
-    plt.title("Coordinator FP (solid) and FN (dashed) over x")
+    plt.ylabel("Count (#) or ratio (%)")
+    plt.title("Coordinator FP (solid) and FN (dashed) over % of removed attributions")
     plt.grid(True, which="both", linestyle=":", linewidth=0.5)
     plt.legend(ncol=2, fontsize=8)
     plt.tight_layout()
