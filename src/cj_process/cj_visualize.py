@@ -1887,11 +1887,10 @@ def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_stri
     coordinators = sorted(results[first_original_key].keys())
 
     # Build series dict: {coordinator: {"fp": [...], "fn": [...]}} aligned to x_vals
-    #series = {c: {"fp": [], "fn": []} for c in coordinators}
     series = {c: {fp_string: [], fn_string: []} for c in coordinators}
 
-    for x in x_vals:
-        x_str = str(x)
+    for num, _orig in _key_pairs:
+        x_str = _orig
         for c in coordinators:
             # Remove offset given by very first value where 0% changes were applied
             REMOVE_OFFSET = False
@@ -1909,8 +1908,6 @@ def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_stri
 
             fp_val = np.average(fp_list) if isinstance(fp_list, list) and fp_list else 0
             fn_val = np.average(fp_list) if isinstance(fn_list, list) and fn_list else 0
-            # fp_val = fp_list[0] if isinstance(fp_list, list) and fp_list else 0
-            # fn_val = fn_list[0] if isinstance(fn_list, list) and fn_list else 0
             series[c][fp_string].append(fp_val)
             series[c][fn_string].append(fn_val)
 
