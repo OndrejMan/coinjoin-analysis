@@ -1651,7 +1651,7 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
             ("Staying outputs / total outputs", data.get("ratio_staying_outputs_2_total_outputs")),
             ("Staying / non-remix outputs", data.get("ratio_staying_outputs_2_nonremix_outputs")),
             ("Remixed inputs / total (numbers)", data.get("ratio_remixed_inputs_2_total_inputs_numbers")),
-            ("Remixed inputs / total (values)", data.get("ratio_remixed_inputs_2_total_inputs_values")),
+            ("Remixed inputs / total (values, BTC)", data.get("ratio_remixed_inputs_2_total_inputs_values")),
         ]
 
         period = ""
