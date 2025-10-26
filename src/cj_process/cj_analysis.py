@@ -1170,6 +1170,29 @@ def load_coinjoins_from_file(target_load_path: str | Path, false_cjtxs: dict | N
     return data
 
 
+def load_coordinator_mapping_from_file(target_load_path: str | Path, filter_source_str: str=None):
+    # Load initial data (two-level dictionary)
+    data = load_json_from_file(target_load_path)
+    # If required, filter out all keys which does not contain filter_source_str (if required)
+    if filter_source_str is not None:
+        for data_source in list(data.keys()):
+            if filter_source_str not in data_source:
+                data.pop(data_source)
+
+    # Collapse into single-level dictionary with conflicts checking
+    collapsed = {}
+    for source in data.keys():
+        for txid in data[source].keys():
+            if txid not in collapsed.keys():
+                collapsed[txid] = data[source][txid]
+            else:
+                assert collapsed[txid] == data[source][txid], f'Conflict in mapped coordinators for {txid} between {collapsed[txid]} and {data[source][txid]}'
+                # if collapsed[txid] != data[source][txid]:
+                #     print(f'Conflict in mapped coordinators for {txid} between {collapsed[txid]} and {data[source][txid]}')
+
+    return collapsed
+
+
 def compute_partial_vsize(tx_hex: str, input_indices: list[int], output_indices: list[int]):
     """
     Compute the exact virtual size (vsize) contribution of selected inputs and outputs

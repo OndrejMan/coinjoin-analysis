@@ -2947,11 +2947,11 @@ def main(argv=None):
         # Load all coords cjtxs
         # Compute difference and print len and txs
         cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), True, None)
-        coord_txs = als.load_json_from_file(os.path.join(target_path, 'wasabi2', 'txid_coord.json'))
+        crawl_coord_txs = als.load_coordinator_mapping_from_file(os.path.join(target_path, 'wasabi2', 'txid_coord.json'), 'crawl')
 
         missing_crawl = {txid: None for txid in cjtxs['coinjoins'] if cjtxs['coinjoins'][txid]['broadcast_time'] > '2024-06-01'
-                         and cjtxs['coinjoins'][txid]['broadcast_time'] < '2025-08-11' and txid not in coord_txs['crawl']}
-        missing_cjtxs = {txid: None for txid in coord_txs['crawl'] if txid not in cjtxs['coinjoins']}
+                         and cjtxs['coinjoins'][txid]['broadcast_time'] < '2025-08-11' and txid not in crawl_coord_txs}
+        missing_cjtxs = {txid: None for txid in crawl_coord_txs if txid not in cjtxs['coinjoins']}
 
         print(f'Missing in crawl: {missing_crawl}, in cjtxs: {missing_cjtxs}')
         print(f'Missing in crawl: {len(missing_crawl)}, in cjtxs: {len(missing_cjtxs)}')
@@ -3442,13 +3442,12 @@ def main(argv=None):
             cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2_others'), None, True)
 
             # Analyze intermix coordinator stats
-            tx_list = {'crawl': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))['crawl']}  # Load known coordinators
-            ground_truth_known_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
+            ground_truth_known_coord_txs = als.load_coordinator_mapping_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'), 'crawl')
             intercoord_ratios = cja.analyze_coordinator_detection(cjtxs, ground_truth_known_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
             als.save_json_to_file_pretty(os.path.join(target_path, f'crawl_intercoord_mix_ratios.json'), intercoord_ratios)
             cjvis.plot_intermix_ratios(intercoord_ratios, target_path, 'crawl_')
 
-            tx_list = {'all': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json'))}  # Load known coordinators
+            tx_list = {'all': als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json'))}
             assigned_coord_txs = {key: tx_list[sublist][key] for sublist in tx_list.keys() for key in tx_list[sublist].keys()}
             intercoord_ratios = cja.analyze_coordinator_detection(cjtxs, assigned_coord_txs, cjc.WASABI2_COORD_NAMES_ALL)
             als.save_json_to_file_pretty(os.path.join(target_path, f'discovered_intercoord_mix_ratios.json'), intercoord_ratios)

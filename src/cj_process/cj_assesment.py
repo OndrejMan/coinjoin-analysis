@@ -231,9 +231,7 @@ def _spawn_initializer(target_path, sorted_cjtxs, initial_known_serial):
     _CJTXS = als.load_coinjoins_from_file(target_path, None, True)["coinjoins"]
     _SORTED_CJTXS = sorted_cjtxs
 
-    _GROUND_TRUTH = als.load_json_from_file(
-        os.path.join(target_path, 'txid_coord.json')
-    )['crawl']
+    _GROUND_TRUTH = als.load_coordinator_mapping_from_file(os.path.join(target_path, 'txid_coord.json'), 'crawl')
 
     # initial_known_serial carries the pre-sorted lists (small enough)
     _INITIAL_KNOWN_TXS = initial_known_serial
@@ -443,9 +441,7 @@ def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, wor
     ordering = als.compute_cjtxs_relative_ordering(cjtxs)
     sorted_cjtxs = sorted(ordering, key=ordering.get)
 
-    ground_truth_known_coord_txs = als.load_json_from_file(
-        os.path.join(target_path, 'txid_coord.json')
-    )['crawl']
+    ground_truth_known_coord_txs = als.load_coordinator_mapping_from_file(os.path.join(target_path, 'txid_coord.json'), 'crawl')
 
     # Build {'coord': [txids]} with deterministic ordering
     transformed_dict = defaultdict(list)
