@@ -11,7 +11,7 @@ import orjson
 import json
 import time
 import numpy as np
-from datetime import timedelta
+from datetime import timedelta, datetime, UTC
 import re
 import math
 #from  txstore import TxStore, TxStoreMsgPack
@@ -440,6 +440,93 @@ def recompute_enter_remix_liquidity_after_removed_cjtxs(coinjoins, mix_protocol:
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] = 0
 
 
+def unfinished_recompute_enter_remix_liquidity_after_added_cjtxs(coinjoins, mix_protocol: MIX_PROTOCOL):
+    """
+    Problem:  we need to set also ['mix_event_type'] for newly added transactions
+    Call after some changes to existing set of coinjoins were made to update MIX_ENTER and MIX_REMIX values.
+    Expected to be called after full analysis by analyze_input_out_liquidity()
+    :param coinjoins: dictionary with coinjoins
+    :param mix_protocol: type of protocol
+    :return:
+    """
+    logging.debug('recompute_enter_remix_liquidity_after_added_cjtxs() started')
+
+    # Idea: Coinjoins may have been added from the set of coinjoins, changing MIX_ENTER -> MIX_REMIX for inputs
+    # and MIX_LEAVE -> MIX_REMIX for outputs
+    # Detect these cases and rectify.
+
+    broadcast_times = {cjtx: precomp_datetime.strptime(coinjoins[cjtx]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f") for cjtx in coinjoins.keys()}
+    # Sort coinjoins based on mining time
+    cj_time = [{'txid': cjtxid, 'broadcast_time': precomp_datetime.strptime(coinjoins[cjtxid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")} for cjtxid in coinjoins.keys()]
+    sorted_cj_times = sorted(cj_time, key=lambda x: x['broadcast_time'])
+    # Precomputed mapping of txid to index for fast burntime computation
+    coinjoins_index = {}
+    for i in range(0, len(sorted_cj_times)):
+        coinjoins_index[sorted_cj_times[i]['txid']] = i
+    coinjoins_relative_order = compute_cjtxs_relative_ordering(coinjoins)
+
+    for cjtx in coinjoins:
+        for input in coinjoins[cjtx]['inputs']:
+            if 'spending_tx' in coinjoins[cjtx]['inputs'][input].keys():
+                update_item = False
+                spending_tx, index = extract_txid_from_inout_string(coinjoins[cjtx]['inputs'][input]['spending_tx'])
+                if 'mix_event_type' in coinjoins[cjtx]['inputs'][input]:
+                    if coinjoins[cjtx]['inputs'][input]['mix_event_type'] == MIX_EVENT_TYPE.MIX_ENTER.name and spending_tx in coinjoins.keys():
+                        # Change to MIX_ENTER as original cjtx is no longer in coinjoin set
+                        logging.debug(f'Changing MIX_ENTER -> MIX_REMIX for input {cjtx}[{input}]')
+                        update_item = True
+                else:
+                    if spending_tx in coinjoins.keys():
+                        # Set to MIX_ENTER as original cjtx is no longer in coinjoin set
+                        logging.debug(f'Setting MIX_REMIX for input {cjtx}[{input}]')
+                        update_item = True
+                    else:
+                        # Not in coinjoin, fresh liquidity
+                        coinjoins[cjtx]['inputs'][input]['mix_event_type'] = MIX_EVENT_TYPE.MIX_ENTER.name
+
+
+                if update_item:
+                    coinjoins[cjtx]['inputs'][input]['mix_event_type'] = MIX_EVENT_TYPE.MIX_REMIX.name
+                    coinjoins[cjtx]['inputs'][input]['burn_time'] = round((broadcast_times[cjtx] - broadcast_times[spending_tx]).total_seconds(), 0)
+                    coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs_as_mined'] = coinjoins_index[cjtx] - coinjoins_index[spending_tx]
+                    coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs_relative'] = coinjoins_relative_order[cjtx] - coinjoins_relative_order[spending_tx]
+                    coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs'] = coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs_relative']
+
+
+        for output in coinjoins[cjtx]['outputs']:
+            if 'spend_by_tx' in coinjoins[cjtx]['outputs'][output].keys():
+                update_item = False
+                spend_by_tx, index = extract_txid_from_inout_string(coinjoins[cjtx]['outputs'][output]['spend_by_tx'])
+
+                if 'mix_event_type' in coinjoins[cjtx]['outputs'][output]:
+                    if coinjoins[cjtx]['outputs'][output]['mix_event_type'] == MIX_EVENT_TYPE.MIX_LEAVE.name and spend_by_tx in coinjoins.keys():
+                        logging.debug(f'Changing MIX_LEAVE -> MIX_REMIX for output {cjtx}[{output}]')
+                        update_item = True
+                else:
+                    if spend_by_tx in coinjoins.keys():
+                        logging.debug(f'Setting MIX_REMIX for input {cjtx}[{output}]')
+                        update_item = True
+                    else:
+                        # Spent outside coinjoin
+                        coinjoins[cjtx]['outputs'][output]['mix_event_type'] = MIX_EVENT_TYPE.MIX_LEAVE.name
+                        # BUGBUG: we need to find spending tx to compute burn time properly
+
+                if update_item:
+                    coinjoins[cjtx]['outputs'][output]['mix_event_type'] = MIX_EVENT_TYPE.MIX_REMIX.name
+                    coinjoins[cjtx]['outputs'][output]['burn_time'] = round((broadcast_times[spend_by_tx] - broadcast_times[cjtx]).total_seconds(), 0)
+                    coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_as_mined'] = coinjoins_index[spend_by_tx] - coinjoins_index[cjtx]
+                    coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative'] = coinjoins_relative_order[spend_by_tx] - coinjoins_relative_order[cjtx]
+                    coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] = coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative']
+            else:
+                if 'mix_event_type' not in coinjoins[cjtx]['outputs'][output]:
+                    # BUGBUG: newly added transaction without 'mix_event_type' for this specific output set.
+                    # May be MIX_EVENT_TYPE.MIX_STAY, MIX_EVENT_TYPE.MIX_LEAVE as well as MIX_EVENT_TYPE.MIX_REMIX
+                    logging.error(f"Missing status of output for {cjtx}['outputs']{output}")
+
+
+    return coinjoins
+
+
 def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, premix_spend, mix_protocol: MIX_PROTOCOL, ww1_coinjoins:dict = None, ww1_postmix_spend:dict = None, warn_if_not_found_in_postmix:bool = True):
     """
     Requires performance speedup, will not finish (after 8 hours) for Whirlpool with very large number of coins
@@ -550,7 +637,7 @@ def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, prem
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_as_mined'] = coinjoins_index[spend_by_tx] - coinjoins_index[cjtx]
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative'] = coinjoins_relative_order[spend_by_tx] - coinjoins_relative_order[cjtx]
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] = coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative']
-                    if mix_protocol != MIX_PROTOCOL.JOINMARKET: # JoinMarket may end-up with schuffled transactions??
+                    if mix_protocol != MIX_PROTOCOL.JOINMARKET:  # JoinMarket may end-up with shuffled transactions??
                         assert coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] >= 0, \
                             f"Invalid burn time computed for {cjtx}:{output}; got {coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs']}; {spend_by_tx} - {cjtx}"
 
@@ -1331,6 +1418,8 @@ def extract_tx_info(txid: str, raw_txs: dict):
         # tx_record['raw_tx_json'] = parsed_data
         tx_record['inputs'] = {}
         tx_record['outputs'] = {}
+        datetime_obj = datetime.fromtimestamp(tx_info['blocktime'], tz=UTC)
+        tx_record['broadcast_time'] = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
         inputs = parsed_data['vin']
         index = 0
@@ -1338,25 +1427,25 @@ def extract_tx_info(txid: str, raw_txs: dict):
             # we need to read and parse previous transaction to obtain address and other information
             in_address, in_full_info = get_input_address(input['txid'], input['vout'], raw_txs)
 
-            tx_record['inputs'][index] = {}
-            tx_record['inputs'][index]['address'] = in_address
-            tx_record['inputs'][index]['txid'] = input['txid']
-            tx_record['inputs'][index]['value'] = int(in_full_info['vout'][input['vout']]['value'] * SATS_IN_BTC)
-            tx_record['inputs'][index]['spending_tx'] = get_output_name_string(input['txid'], input['vout'])
-            tx_record['inputs'][index]['wallet_name'] = 'real_unknown'
+            tx_record['inputs'][str(index)] = {}
+            tx_record['inputs'][str(index)]['address'] = in_address
+            tx_record['inputs'][str(index)]['txid'] = input['txid']
+            tx_record['inputs'][str(index)]['value'] = int(in_full_info['vout'][input['vout']]['value'] * SATS_IN_BTC)
+            tx_record['inputs'][str(index)]['spending_tx'] = get_output_name_string(input['txid'], input['vout'])
+            tx_record['inputs'][str(index)]['wallet_name'] = 'real_unknown'
 
-            input_addresses[index] = in_address  # store address to index of the input
+            input_addresses[str(index)] = in_address  # store address to index of the input
             index = index + 1
 
         outputs = parsed_data['vout']
         for output in outputs:
             index = output['n']
-            output_addresses[index] = output['scriptPubKey']['address']
-            tx_record['outputs'][index] = {}
-            tx_record['outputs'][index]['address'] = output['scriptPubKey']['address']
-            tx_record['outputs'][index]['value'] = int(output['value'] * SATS_IN_BTC)
-            # tx_record['outputs'][index]['spend_by_tx'] = get_input_name_string(output['txid'], output['vout'])
-            tx_record['outputs'][index]['wallet_name'] = 'real_unknown'
+            output_addresses[str(index)] = output['scriptPubKey']['address']
+            tx_record['outputs'][str(index)] = {}
+            tx_record['outputs'][str(index)]['address'] = output['scriptPubKey']['address']
+            tx_record['outputs'][str(index)]['value'] = int(output['value'] * SATS_IN_BTC)
+            # tx_record['outputs'][str(index)]['spend_by_tx'] = get_input_name_string(output['txid'], output['vout'])
+            tx_record['outputs'][str(index)]['wallet_name'] = 'real_unknown'
 
     except json.JSONDecodeError as e:
         print("Error decoding JSON:", e)
