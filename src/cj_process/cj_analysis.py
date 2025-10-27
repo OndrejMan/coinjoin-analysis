@@ -1970,3 +1970,21 @@ def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path)
     tx_to_coord_map = {txid:coord for coord in coord_txs_named.keys() for txid in coord_txs_named[coord]}
     save_json_to_file_pretty(os.path.join(target_path, 'txid_to_coord_discovered_renamed.json'), tx_to_coord_map)
 
+
+def get_missing_cjtxs(cjtxs: dict, mappings: dict, dataset_names: list, target_path: str | Path):
+    # Extract and save txids for transactions included in mappings, but not in cjtxs
+    crawl_coord_txs = {txid: None for dataset, txs in mappings.items() if dataset in dataset_names for txid in txs}
+    missing_crawl = {txid: None for txid in cjtxs['coinjoins'] if
+                     cjtxs['coinjoins'][txid]['broadcast_time'] > '2024-06-01' and txid not in crawl_coord_txs}
+    missing_cjtxs = {txid: None for txid in crawl_coord_txs if txid not in cjtxs['coinjoins']}
+
+    print(f'Missing in crawl: {len(missing_crawl)}, in cjtxs: {len(missing_cjtxs)}')
+
+    save_json_to_file(os.path.join(target_path, 'missing_cjtxs_from_crawl.json'),
+                          list(missing_crawl.keys()))
+    save_json_to_file(os.path.join(target_path, 'missing_cjtxs_from_dumplings.json'),
+                          list(missing_cjtxs.keys()))
+
+    return missing_cjtxs
+
+

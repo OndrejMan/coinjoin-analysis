@@ -2474,6 +2474,7 @@ class DumplingsParseOptions:
     SPLIT_WHIRLPOOL_POOLS = False
     DETECT_COORDINATORS = False
     SPLIT_COORDINATORS = False
+    DOWNLOAD_MISSING_TRANSACTIONS = False
     PLOT_REMIXES_FLOWS = False
     ANALYSIS_ADDRESS_REUSE = False
     ANALYSIS_PROCESS_ALL_COINJOINS = False
@@ -2574,6 +2575,7 @@ class DumplingsParseOptions:
         self.SPLIT_WHIRLPOOL_POOLS = False
         self.DETECT_COORDINATORS = False
         self.SPLIT_COORDINATORS = False
+        self.DOWNLOAD_MISSING_TRANSACTIONS = False
 
         self.ANALYSIS_ADDRESS_REUSE = False
         self.ANALYSIS_PROCESS_ALL_COINJOINS = False
@@ -2615,6 +2617,7 @@ def free_memory(data_to_free):
 
 
 def generate_normalized_json(base_path: str, base_txs: list):
+    logging.info(f'generate_normalized_json({base_path})')
     # 1. Generate base download script for provided base transactions
     download_base_file = os.path.join(base_path, 'download_base_txs.sh')
     als.generate_tx_download_script(base_txs, download_base_file)
@@ -2622,9 +2625,17 @@ def generate_normalized_json(base_path: str, base_txs: list):
     # 2. Load base_txs from hex (after downloading) and generate download script for all input transactions
     raw_txs = {}
     for txid in base_txs:
-        raw_txs[txid] = als.load_json_from_file(os.path.join(base_path, f'{txid}.json'))['result']
-    txids = set(base_txs)
+        raw_tx = als.load_json_from_file(os.path.join(base_path, f'{txid}.json'))
+        if raw_tx['result']:
+            raw_txs[txid] = raw_tx['result']
+        else:
+            print(f"{txid} - {raw_tx['error']}")
+
+    base_txs_existing = list(raw_txs.keys())
+
+    txids = set(raw_txs)
     for txid in raw_txs:
+        # Add all input tx ids
         for tx in raw_txs[txid]['vin']:
             txids.add(tx['txid'])
     download_base_file = os.path.join(base_path, 'download_all_txs.sh')
@@ -2644,9 +2655,11 @@ def generate_normalized_json(base_path: str, base_txs: list):
             print(f'Skipping {filename}')
 
     cjtxs = {'coinjoins': {}}
-    for txid in base_txs:
+    for txid in base_txs_existing:
         cjtxs['coinjoins'][txid] = als.extract_tx_info(txid, raw_txs)
     als.save_json_to_file_pretty(os.path.join(base_path, f'coinjoin_tx_info.json'), cjtxs)
+
+    return cjtxs
 
 
 def wasabi_plot_remixes(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: str | Path, tx_file: str,
@@ -3435,6 +3448,38 @@ def main(argv=None):
                 cjvis.estimate_wallet_prediction_factor(target_path, coord)
         if op.CJ_TYPE == CoinjoinType.WW1:
             cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
+
+
+    # Combine information from already downloaded dumplings transactions and crawled ones
+    if op.DOWNLOAD_MISSING_TRANSACTIONS:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            # Load all coinjoins
+            cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2_others'), None, True)
+
+            # Analyze overlap of crawled transactions
+            coord_txs_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))
+            base_cjtxs_to_download = als.get_missing_cjtxs(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], target_path)
+            if not os.path.exists(os.path.join(op.target_base_path, 'missing_dumplings_txs')):
+                os.makedirs(os.path.join(op.target_base_path, 'missing_dumplings_txs'))
+            # Download and parse these additional transactions
+            additional_txs = generate_normalized_json(os.path.join(op.target_base_path, 'missing_dumplings_txs'), list(base_cjtxs_to_download.keys()))
+            logging.info(f"Adding {len(additional_txs['coinjoins'])} additional coinjoin transactions")
+
+            # Add newly downloaded transactions into existing coinjoins and save
+            for txid in additional_txs['coinjoins'].keys():
+                if txid not in cjtxs['coinjoins']:
+                    cjtxs['coinjoins'][txid] = additional_txs['coinjoins'][txid]
+                else:
+                    logging.warning(f'Transaction {txid} already in known coinjoins, skipping')
+
+            #als.recompute_enter_remix_liquidity_after_added_cjtxs(cjtxs['coinjoins'], MIX_PROTOCOL.WASABI2)
+
+            # Analyze overlap of crawled transactions
+            coord_txs_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))
+            cjviz.plot_mapping_datasets_stats(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], os.path.join(target_path, 'wasabi2_others', 'crawl_datasets.png'))
+            #als.save_json_to_file(os.path.join(target_path, 'wasabi2_others', 'coinjoin_tx_info_2.json'), cjtxs)
+
+
 
     if op.ANALYZE_DETECT_COORDINATORS_ALG:
         if op.CJ_TYPE == CoinjoinType.WW2:
