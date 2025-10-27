@@ -1928,3 +1928,67 @@ def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_stri
     plt.tight_layout()
     plt.savefig(Path(target_path, filename), dpi=200, bbox_inches="tight")
     plt.close()
+
+
+def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list, target_path: str | Path):
+    # Plot number of transactions per day from different datasets
+    crawl_coord_txs = {txid: None for dataset, txs in mappings.items() if dataset in dataset_names for txid in txs}
+
+    datasets_dates = {}
+    for dataset_name in dataset_names:
+        datasets_dates[dataset_name] = {txid: precomp_datetime.strptime(cjtxs['coinjoins'][txid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")
+                                        for txid in mappings[dataset_name].keys()}
+    datasets_dates['all'] = {txid: precomp_datetime.strptime(cjtxs['coinjoins'][txid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")
+                                    for txid in cjtxs['coinjoins'].keys()}
+    datasets_dates['unattributed'] = {txid: precomp_datetime.strptime(cjtxs['coinjoins'][txid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")
+                                    for txid in cjtxs['coinjoins'].keys() if txid not in crawl_coord_txs}
+
+    # --- aggregate to daily counts per dataset ---
+    def daily_counts_from_datasets(ds_dates, tz_localize=None, tz_convert=None) -> pd.DataFrame:
+        series_dict = {}
+        for name, d in ds_dates.items():
+            idx = pd.to_datetime(list(d.values()))
+            if tz_localize:
+                idx = pd.DatetimeIndex(idx).tz_localize(tz_localize)
+            if tz_convert:
+                idx = pd.DatetimeIndex(idx).tz_convert(tz_convert)
+
+            s = pd.Series(1, index=idx).sort_index()
+            s = s.groupby(s.index.normalize()).size()
+            series_dict[name] = s
+
+        all_dates = pd.date_range(
+            start=min(s.index.min() for s in series_dict.values()),
+            end=max(s.index.max() for s in series_dict.values()),
+            freq="D",
+        )
+
+        df = pd.DataFrame(index=all_dates)
+        for name, s in series_dict.items():
+            df[name] = s.reindex(all_dates, fill_value=0).astype(int)
+        return df
+
+    # If your timestamps are UTC but you want Europe/Prague day boundaries:
+    # df = daily_counts_from_datasets(datasets_dates, tz_localize="UTC", tz_convert="Europe/Prague")
+    df = daily_counts_from_datasets(datasets_dates)
+
+    # --- plot (matplotlib) ---
+    plt.figure(figsize=(10, 5))
+    for col in df.columns:
+        if col == 'unattributed':
+            plt.fill_between(df.index, df[col], alpha=0.7, label=col, color='gray')
+            plt.plot(df.index, df[col], linewidth=1.0, alpha=0.9, label="_nolegend_", color='red')
+        elif col == 'all':
+            plt.plot(df.index, df[col], label=col, alpha=0.3, linewidth=3, color='gray')
+        else:
+            plt.plot(df.index, df[col], label=col, alpha=0.9, linestyle="-.")
+
+    plt.title("Daily coinjoin transactions attributed by different ground-truth datasets")
+    #plt.xlabel("Date")
+    plt.ylabel("Coinjoins per day")
+    plt.legend(loc="upper right")
+    plt.grid(True, linewidth=0.5, alpha=0.4)
+    plt.tight_layout()
+    plt.savefig(target_path, dpi=200, bbox_inches="tight")
+    print(f'Saving {target_path}')
+    plt.close()
