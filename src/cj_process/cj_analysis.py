@@ -173,9 +173,12 @@ def get_ratio(numerator, denominator) -> int:
 
 def get_ratio_string(numerator, denominator) -> str:
     if denominator != 0:
-        return f'{numerator}/{denominator} ({get_ratio(numerator, denominator)}%)'
+        if isinstance(numerator, int):
+            return f'{numerator}/{denominator} ({get_ratio(numerator, denominator)}%)'
+        else:
+            return f'{numerator:.2f}/{denominator:.2f} ({get_ratio(numerator, denominator)}%)'
     else:
-        return f'{numerator}/{0} (0%)'
+        return f'{numerator:.2f}/{0} (0%)'
 
 
 def get_inputs_type_list(coinjoins, sorted_cj_time, event_type, in_or_out: str, burn_time_from, burn_time_to, analyze_values, restrict_to_in_size: (int, int), only_standard_denoms: False):
