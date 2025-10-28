@@ -3513,17 +3513,22 @@ def main(argv=None):
             #     cja._eval_drop_attributions_single_coord,
             #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.TAIL),
             #     'coord_discovery_analysis_taildrop')
-            # Drop random transactions from ground truth attribution
             cja.wasabi_detect_coordinators_evaluation_parallel(
                 os.path.join(target_path, 'wasabi2_others'),
                 cja._eval_drop_attributions_single_coord,
-                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 5)), cja.DROP_TYPE.RANDOM_SINGLE),
-                'coord_discovery_analysis_randomdrop')
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
+                'coord_discovery_analysis_frontdrop')
+            # # Drop random transactions from ground truth attribution
+            # cja.wasabi_detect_coordinators_evaluation_parallel(
+            #     os.path.join(target_path, 'wasabi2_others'),
+            #     cja._eval_drop_attributions_single_coord,
+            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 5)), cja.DROP_TYPE.RANDOM_SINGLE),
+            #     'coord_discovery_analysis_randomdrop')
             # # Analyze impact of threshold for intermix attributions
             # cja.wasabi_detect_coordinators_evaluation_parallel(
             #     os.path.join(target_path, 'wasabi2_others'),
             #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG(list(np.linspace(0.1, 0.9, 10)), list(range(0, 101, 30)), [1], cja.DROP_TYPE.TAIL),
+            #     cja.COORD_DISCOVERY_ANALYSIS_CFG(list(np.linspace(0.1, 0.9, 10)), list(range(0, 101, 20)), [1], cja.DROP_TYPE.TAIL),
             #     'coord_discovery_analysis_threshold')
 
     # !!! Generate decreased attribution for single coordinator only (all other will stay the same)

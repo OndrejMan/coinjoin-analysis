@@ -74,6 +74,7 @@ class DROP_TYPE(Enum):
     RANDOM_ANY = 'RANDOM_ANY'
     RANDOM_SINGLE = 'RANDOM_SINGLE'
     TAIL = 'TAIL'
+    FRONT = 'FRONT'
 
 class COORD_DISCOVERY_ANALYSIS_CFG:
     threshold_range = []
@@ -144,14 +145,19 @@ def drop_random_fraction_dict(initial_data: dict, percent: int):
             if secrets.randbelow(10000) < int(10000 * keep_prob)}
 
 
-def drop_last_fraction_dict(initial_data: dict, percent: int, coord_to_drop: None):
+def drop_part_fraction_dict(initial_data: dict, percent: int, coord_to_drop: None, from_end: bool = True):
     if not 0 <= percent <= 100:
         raise ValueError("percent must be between 0 and 100")
     for coord in list(initial_data.keys()):
         if coord_to_drop is not None and coord != coord_to_drop:
             continue
         keep_len = int((1 - percent / 100) * len(initial_data[coord]))
-        initial_data[coord] = initial_data[coord][0:keep_len]
+        if from_end:
+            # Drop ending transactions
+            initial_data[coord] = initial_data[coord][0:keep_len]
+        else:
+            # Drop front transactions
+            initial_data[coord] = initial_data[coord][len(initial_data[coord]) - keep_len : ]
     return initial_data
 
 
@@ -189,8 +195,13 @@ def _eval_drop_attributions_single_coord(coord_to_test, cfg: COORD_DISCOVERY_ANA
                         drop_initial_known_txs[coord_to_test].pop(i)
             elif cfg.drop_type == DROP_TYPE.TAIL:
                 # Dropping tail attributed txs
-                drop_initial_known_txs = drop_last_fraction_dict(
-                    drop_initial_known_txs, drop_fraction, coord_to_drop=coord_to_test
+                drop_initial_known_txs = drop_part_fraction_dict(
+                    drop_initial_known_txs, drop_fraction, coord_to_drop=coord_to_test, from_end=True
+                )
+            elif cfg.drop_type == DROP_TYPE.FRONT:
+                # Dropping tail attributed txs
+                drop_initial_known_txs = drop_part_fraction_dict(
+                    drop_initial_known_txs, drop_fraction, coord_to_drop=coord_to_test, from_end=False
                 )
             else:
                 assert False, 'Invalid drop type'
