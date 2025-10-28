@@ -3477,11 +3477,13 @@ def main(argv=None):
                 else:
                     logging.warning(f'Transaction {txid} already in known coinjoins, skipping')
 
+            SM.print(f"Missing in crawl = {len(missing_crawl)} from total cjtxs = {len(cjtxs['coinjoins'])} "
+                     f"({(len(missing_crawl) / len(cjtxs['coinjoins'])) * 100:.2f}%)")
             #als.recompute_enter_remix_liquidity_after_added_cjtxs(cjtxs['coinjoins'], MIX_PROTOCOL.WASABI2)
 
             # Analyze overlap of crawled transactions
             coord_txs_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))
-            cjviz.plot_mapping_datasets_stats(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], os.path.join(target_path, 'wasabi2_others', 'crawl_datasets.png'))
+            cjviz.plot_mapping_datasets_stats(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], os.path.join(target_path, 'wasabi2_others'))
             #als.save_json_to_file(os.path.join(target_path, 'wasabi2_others', 'coinjoin_tx_info_2.json'), cjtxs)
 
 

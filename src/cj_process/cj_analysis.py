@@ -1982,13 +1982,13 @@ def get_missing_cjtxs(cjtxs: dict, mappings: dict, dataset_names: list, target_p
                      cjtxs['coinjoins'][txid]['broadcast_time'] > '2024-06-01' and txid not in crawl_coord_txs}
     missing_cjtxs = {txid: None for txid in crawl_coord_txs if txid not in cjtxs['coinjoins']}
 
-    print(f'Missing in crawl: {len(missing_crawl)}, in cjtxs: {len(missing_cjtxs)}')
+    SM.print(f'Missing in crawl: {len(missing_crawl)}, in cjtxs: {len(missing_cjtxs)}')
 
     save_json_to_file(os.path.join(target_path, 'missing_cjtxs_from_crawl.json'),
                           list(missing_crawl.keys()))
     save_json_to_file(os.path.join(target_path, 'missing_cjtxs_from_dumplings.json'),
                           list(missing_cjtxs.keys()))
 
-    return missing_cjtxs
+    return missing_cjtxs, missing_crawl
 
 
