@@ -1365,13 +1365,17 @@ def detect_bybit_hack(target_path: str, interval: str, bybit_hack_addresses: dic
     return results
 
 
-def generate_tx_download_script(txids: list, file_name):
+def generate_tx_download_script(txids: list, file_name, target_path: Path | str):
     curl_lines = []
     for cjtx in txids:
-        curl_str = "curl --user user:password --data-binary \'{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getrawtransaction\", \"params\": [\"" + cjtx + "\", true]}\' -H \'Content-Type: application/json\' http://127.0.0.1:8332/" + f" > {cjtx}.json\n"
-        curl_lines.append(curl_str)
+        # Generate download record only for transactions not yet downloaded
+        if not os.path.exists(os.path.join(target_path, f'{cjtx}.json')):
+            curl_str = "curl --user user:password --data-binary \'{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getrawtransaction\", \"params\": [\"" + cjtx + "\", true]}\' -H \'Content-Type: application/json\' http://127.0.0.1:8332/" + f" > {cjtx}.json\n"
+            curl_lines.append(curl_str)
     with open(file_name, 'w') as f:
         f.writelines(curl_lines)
+
+    return file_name
 
 
 def get_input_address(txid, txid_in_out, raw_txs: dict = None):

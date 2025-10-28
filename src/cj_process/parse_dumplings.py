@@ -2616,12 +2616,13 @@ def free_memory(data_to_free):
     time.sleep(3)
 
 
-def generate_normalized_json(base_path: str, base_txs: list):
+def generate_normalized_json(base_path: str | Path, base_txs: list):
     logging.info(f'generate_normalized_json({base_path})')
+
     # 1. Generate base download script for provided base transactions
     download_base_file = os.path.join(base_path, 'download_base_txs.sh')
-    als.generate_tx_download_script(base_txs, download_base_file)
-
+    script_path = als.generate_tx_download_script(base_txs, download_base_file, base_path)
+    SM.print(f'Run {script_path} to obtain transactions')
     # 2. Load base_txs from hex (after downloading) and generate download script for all input transactions
     raw_txs = {}
     for txid in base_txs:
@@ -2639,7 +2640,8 @@ def generate_normalized_json(base_path: str, base_txs: list):
         for tx in raw_txs[txid]['vin']:
             txids.add(tx['txid'])
     download_base_file = os.path.join(base_path, 'download_all_txs.sh')
-    als.generate_tx_download_script(list(txids), download_base_file)
+    script_path = als.generate_tx_download_script(list(txids), download_base_file, base_path)
+    SM.print(f'Run {script_path} to obtain transactions')
 
     # 3. Load all txs downloaded in folder and create normalized coinjoin_tx_info.json
     json_files = [f for f in os.listdir(base_path) if f.endswith('.json')]
@@ -3458,11 +3460,14 @@ def main(argv=None):
 
             # Analyze overlap of crawled transactions
             coord_txs_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))
-            base_cjtxs_to_download = als.get_missing_cjtxs(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], target_path)
-            if not os.path.exists(os.path.join(op.target_base_path, 'missing_dumplings_txs')):
-                os.makedirs(os.path.join(op.target_base_path, 'missing_dumplings_txs'))
+            base_cjtxs_to_download, missing_crawl = als.get_missing_cjtxs(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], target_path)
+
+            # Generate download scripts into folder two levels up
+            temp_base_path = Path(op.target_base_path).parent / 'missing_dumplings_txs'
+            if not os.path.exists(temp_base_path):
+                os.makedirs(temp_base_path)
             # Download and parse these additional transactions
-            additional_txs = generate_normalized_json(os.path.join(op.target_base_path, 'missing_dumplings_txs'), list(base_cjtxs_to_download.keys()))
+            additional_txs = generate_normalized_json(temp_base_path, list(base_cjtxs_to_download.keys()))
             logging.info(f"Adding {len(additional_txs['coinjoins'])} additional coinjoin transactions")
 
             # Add newly downloaded transactions into existing coinjoins and save
