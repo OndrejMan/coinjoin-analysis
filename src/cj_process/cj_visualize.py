@@ -1833,21 +1833,21 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
         in_positions = [bp - offset for bp in base_positions]
         out_positions = [bp + offset for bp in base_positions]
 
-        plt.figure(figsize=(max(8, M * 0.9), 5))
+        plt.figure(figsize=(max(8, M * 0.9), 3))
 
-        bp_in = plt.boxplot(in_series, positions=in_positions, widths=0.25, patch_artist=True, showfliers=False)
+        bp_in = plt.boxplot(in_series, whis=(5,95), positions=in_positions, widths=0.25, patch_artist=True, showfliers=False)
         for patch in bp_in["boxes"]:
             patch.set(facecolor="#f28e2b")
         for element in ["whiskers", "caps", "medians"]:
             for line in bp_in[element]:
                 line.set(color="#6b6b6b", linewidth=1.2)
 
-        bp_out = plt.boxplot(out_series, positions=out_positions, widths=0.25, patch_artist=True, showfliers=False)
+        bp_out = plt.boxplot(out_series, whis=(5,95), positions=out_positions, widths=0.25, patch_artist=True, showfliers=False)
         for patch in bp_out["boxes"]:
             patch.set(facecolor="#4e79a7")
 
         # Rotate labels 45 degrees
-        plt.xticks(base_positions, coordinators, rotation=45, ha="right")
+        plt.xticks(base_positions, coordinators, rotation=15, ha="right")
 
         for element in ["whiskers", "caps", "medians"]:
             for line in bp_out[element]:
@@ -1868,7 +1868,7 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
         plt.close()
 
 
-def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_string: str, fn_string: str, filename: str):
+def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int, results: dict, target_path: str | Path, fp_string: str, fn_string: str, filename: str):
     def _to_float_or_die(v):
         try:
             return float(v)
@@ -1922,7 +1922,7 @@ def plot_coord_attribution_stats(results: dict, target_path: str | Path, fp_stri
 
     plt.xlabel("Removed attributions (%)")
     plt.ylabel("Count (#) or ratio (%)")
-    plt.title("Coordinator FP (solid) and FN (dashed) over % of removed attributions")
+    plt.title(f"Coordinator '{main_coordinator}' ({num_true_coord_txs}) FP (solid) and FN (dashed) over % of removed attributions")
     plt.grid(True, which="both", linestyle=":", linewidth=0.5)
     plt.legend(ncol=2, fontsize=8)
     plt.tight_layout()
@@ -1936,12 +1936,14 @@ def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list
 
     datasets_dates = {}
     for dataset_name in dataset_names:
-        datasets_dates[dataset_name] = {txid: precomp_datetime.strptime(cjtxs['coinjoins'][txid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")
+        datasets_dates[dataset_name] = {txid: cjtxs['coinjoins'][txid]['broadcast_time']
                                         for txid in mappings[dataset_name].keys()}
-    datasets_dates['all'] = {txid: precomp_datetime.strptime(cjtxs['coinjoins'][txid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")
+    datasets_dates['all'] = {txid: cjtxs['coinjoins'][txid]['broadcast_time']
                                     for txid in cjtxs['coinjoins'].keys()}
-    datasets_dates['unattributed'] = {txid: precomp_datetime.strptime(cjtxs['coinjoins'][txid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")
+    datasets_dates['unattributed'] = {txid: cjtxs['coinjoins'][txid]['broadcast_time']
                                     for txid in cjtxs['coinjoins'].keys() if txid not in crawl_coord_txs}
+
+    als.save_json_to_file_pretty(os.path.join(target_path, 'coordinator_attribution_dataset.json'), datasets_dates)
 
     # --- aggregate to daily counts per dataset ---
     def daily_counts_from_datasets(ds_dates, tz_localize=None, tz_convert=None) -> pd.DataFrame:
@@ -1976,19 +1978,20 @@ def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list
     plt.figure(figsize=(10, 5))
     for col in df.columns:
         if col == 'unattributed':
-            plt.fill_between(df.index, df[col], alpha=0.7, label=col, color='gray')
+            plt.fill_between(df.index, df[col], alpha=0.4, label=col, color='red')
             plt.plot(df.index, df[col], linewidth=1.0, alpha=0.9, label="_nolegend_", color='red')
         elif col == 'all':
-            plt.plot(df.index, df[col], label=col, alpha=0.3, linewidth=3, color='gray')
+            plt.plot(df.index, df[col], label=f'all: dumplings + crawl_*', alpha=0.3, linewidth=3, color='gray')
         else:
-            plt.plot(df.index, df[col], label=col, alpha=0.9, linestyle="-.")
+            plt.fill_between(df.index, df[col], alpha=0.1, label="_nolegend_")
+            plt.plot(df.index, df[col], label=f'dataset: {col}', alpha=0.9, linestyle="-.")
 
-    plt.title("Daily coinjoin transactions attributed by different ground-truth datasets")
+    plt.title("Daily coinjoin transactions attributed by different ground-truth datasets (post-zkSNACKs)")
     #plt.xlabel("Date")
     plt.ylabel("Coinjoins per day")
     plt.legend(loc="upper right")
     plt.grid(True, linewidth=0.5, alpha=0.4)
     plt.tight_layout()
-    plt.savefig(target_path, dpi=200, bbox_inches="tight")
+    plt.savefig(os.path.join(target_path, 'crawl_datasets.png'), dpi=200, bbox_inches="tight")
     print(f'Saving {target_path}')
     plt.close()

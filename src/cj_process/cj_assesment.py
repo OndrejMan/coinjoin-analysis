@@ -413,10 +413,9 @@ def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, wor
             if os.path.exists(file_path):
                 results_all = als.load_json_from_file(file_path)
                 results = results_all
-                #results = results_all['intermix_threshold_0.4']
-                cjviz.plot_coord_attribution_stats(results, target_path, "fp", "fn",
+                cjviz.plot_coord_attribution_stats(coord, len(initial_known_txs[coord]), results, target_path, "fp", "fn",
                                                    f"{coord}_{experiment_name_th}_nominal.png")
-                cjviz.plot_coord_attribution_stats(results, target_path, "fp_ratio",
+                cjviz.plot_coord_attribution_stats(coord, len(initial_known_txs[coord]), results, target_path, "fp_ratio",
                                                        "fn_ratio", f"{coord}_{experiment_name_th}_ratio.png")
             else:
                 logging.warning(f'File {file_path} does not exists')
