@@ -12,6 +12,8 @@ from enum import Enum
 from typing import List
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
+
+
 from cj_process import cj_visualize as cjviz
 
 from cj_process import cj_analysis as als
@@ -177,7 +179,6 @@ def _eval_drop_attributions_single_coord(coord_to_test, cfg: COORD_DISCOVERY_ANA
 
         for _ in cfg.repeat_range:  # Iterate specified number of times (to compute )
             # Prepare structures for modification (dropping certain attributions)
-            drop_ground_truth_known_coord_txs = copy.deepcopy(_GROUND_TRUTH)
             drop_initial_known_txs = copy.deepcopy(_INITIAL_KNOWN_TXS)
 
             if cfg.drop_type == DROP_TYPE.RANDOM_ANY:
@@ -205,6 +206,12 @@ def _eval_drop_attributions_single_coord(coord_to_test, cfg: COORD_DISCOVERY_ANA
                 )
             else:
                 assert False, 'Invalid drop type'
+
+            # Remove previously dropped transaction attribution (drop_initial_known_txs) also from drop_ground_truth_known_coord_txs set
+            drop_ground_truth_known_coord_txs = copy.deepcopy(_GROUND_TRUTH)
+            for txid, coord in _GROUND_TRUTH.items():
+                if txid not in drop_initial_known_txs[coord]:
+                    drop_ground_truth_known_coord_txs.pop(txid)
 
             # Core detection (READS globals)
             _, _, _, coord_txs_named_sorted = als.run_coordinator_detection(
