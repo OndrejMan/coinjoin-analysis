@@ -232,7 +232,7 @@ def _eval_drop_attributions_single_coord(coord_to_test, cfg: COORD_DISCOVERY_ANA
                 FN = gt - pred
                 # Correct for unattributed transactions from "drop_fraction == 0" case
                 FP = [txid for txid in FP if txid not in baseline_coord_txs_named_sorted[coord_name]['fp_list']]
-                FN = [txid for txid in FP if txid not in baseline_coord_txs_named_sorted[coord_name]['fn_list']]
+                FN = [txid for txid in FN if txid not in baseline_coord_txs_named_sorted[coord_name]['fn_list']]
                 denom = max(1, len(_INITIAL_KNOWN_TXS[coord_name]))
                 # Now compute and store results
                 results[drop_fraction][coord_name]['fp'].append(len(FP))
