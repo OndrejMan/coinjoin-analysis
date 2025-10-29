@@ -2913,6 +2913,16 @@ def main(argv=None):
     if op.DEBUG:
         print('DEBUGING TIME!!!')
 
+        omitt_coords = ['dragonordnance']
+
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop', True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany', False)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropsingle', False)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropsingle2', True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop2', True)
+        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop3', omitt_coords, True)
+        exit(42)
+
         file_path = os.path.join(target_path, f"kruw_coord_discovery_analysis_taildrop_intermix_threshold__0.4.json")
         if os.path.exists(file_path):
             results_all = als.load_json_from_file(file_path)

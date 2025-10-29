@@ -1,4 +1,3 @@
-import math
 import os
 from collections import defaultdict
 from datetime import timedelta
@@ -6,7 +5,7 @@ from pathlib import Path
 from html import escape
 
 from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 import matplotlib.dates as mdates
 import mpl_toolkits.axisartist as AA
 
@@ -1922,12 +1921,62 @@ def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int,
 
     plt.xlabel("Removed attributions (%)")
     plt.ylabel("Count (#) or ratio (%)")
-    plt.title(f"Coordinator '{main_coordinator}' ({num_true_coord_txs}) FP (solid) and FN (dashed) over % of removed attributions")
+    plt.title(f"Coordinator '{main_coordinator}' ({num_true_coord_txs} txs) FP (solid) and FN (dashed) over % of removed attributions")
     plt.grid(True, which="both", linestyle=":", linewidth=0.5)
     plt.legend(ncol=2, fontsize=8)
     plt.tight_layout()
     plt.savefig(Path(target_path, filename), dpi=200, bbox_inches="tight")
     plt.close()
+
+    return series, x_vals
+
+
+def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: str, omitt_coords: list, log_scale: bool):
+    file_path = os.path.join(target_path, f'{filename}.json')
+    results = als.load_json_from_file(file_path)
+    fp_string = 'fp'
+    fn_string = 'fn'
+
+    for threshold in results:
+        series_aggregated = {coord: {} for coord in results[threshold]}
+        for coord in results[threshold]:
+            series, x_vals = plot_coord_attribution_stats(coord, 0, results[threshold][coord], target_path,
+                                                                fp_string, fn_string,
+                                                                f"{coord}_coord_discovery_analysis_nominal.png")
+            series_aggregated[coord] = {
+                fp_string: [sum(vals) for vals in zip(*(series[c][fp_string] for c in series))],
+                fn_string: [sum(vals) for vals in zip(*(series[c][fn_string] for c in series))],
+                'unattributed': series['unattributed'][fp_string],
+            }
+
+        plt.figure(figsize=(12, 7))
+        for coord in series_aggregated:
+            if coord not in omitt_coords:
+                fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                                    label=f"{coord} (misattributed)", alpha=0.7, linewidth=3)
+                # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                #                     label=f"{coord} (false positives)", alpha=0.7, linewidth=3)
+                # plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label=f"{coord} (false negatives)",
+                #          color=fp_line.get_color(),
+                #          alpha=1, linewidth=1)
+                # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
+                #          color=fp_line.get_color(), alpha=0.5,
+                #          linewidth=5)
+
+        plt.xlabel("Removed attributions (%)")
+        plt.ylabel("Numer of transactions (log scale)")
+        plt.title(f"Number of misattributed transactions to % of removed attributions")
+#        plt.title(f"Number of false positives, false negatives and unattributed over % of removed attributions")
+        plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+        plt.legend(handlelength=4, handletextpad=0.8, ncol=1)
+        #plt.legend(handlelength=4, handletextpad=0.8, ncol=1, fontsize=8)
+        if log_scale:
+            plt.yscale('log')
+        plt.gca().yaxis.set_major_formatter(ScalarFormatter())
+        plt.ticklabel_format(style='plain', axis='y')
+        plt.tight_layout()
+        plt.savefig(Path(target_path, f'{filename}_aggregated.png'), dpi=200, bbox_inches="tight")
+        plt.close()
 
 
 def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list, target_path: str | Path):
