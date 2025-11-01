@@ -403,7 +403,7 @@ def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, wor
 
     for intermix_threshold in worker_config.threshold_range:  # Iterate over provided range of intermix thresholds (detection parameter)
         # Prepare specific detection threshold
-        experiment_name_th = f'{experiment_base_name}_intermix_threshold__{intermix_threshold}'
+        experiment_name_th = f'{experiment_base_name}_intermixthreshold__{intermix_threshold}'
         worker_config.intermix_threshold = intermix_threshold
         worker_config.experiment_name = experiment_name_th
 
@@ -420,7 +420,7 @@ def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, wor
                 k, res = fut.result()
                 combined_results[k] = res
 
-        combined_results_all[f'intermix_threshold__{intermix_threshold}'] = combined_results
+        combined_results_all[f'intermixthreshold__{intermix_threshold}'] = combined_results
 
         # Plot results
         for coord in coordinators_names:
