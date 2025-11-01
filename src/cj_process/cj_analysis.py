@@ -1797,6 +1797,9 @@ def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_know
     # 2. Second pass: Perform second pass with coordinators with lower than MIN_COORD_CJTXS
     # First pass may misclassify coordinators if transactions are out of order.
 
+    # Store names of named coordinators from initial already known set (additional coordinator ids can be recovered later)
+    named_coords = list(initial_known_txs.keys())
+
     coord_txs = initial_known_txs
     last_num_coordinators = -1
     last_coord_txs = {}
@@ -1912,8 +1915,9 @@ def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_know
         with_date = [txid for txid in coord_txs_named[coord_id] if txid in cjtxs.keys()]
         with_date_sorted = sorted(with_date, key=lambda x: cjtxs[x]['broadcast_time'])
         coord_txs_named_sorted[coord_id] = without_date_sorted + with_date_sorted
-    # Add all not attributed transactions
-    all_attributed = [txid for coord_id in coord_txs_named_sorted for txid in coord_txs_named_sorted[coord_id]]
+
+    # Add all not attributed transactions (coord not in named_coords)
+    all_attributed = [txid for coord_id in coord_txs_named_sorted for txid in coord_txs_named_sorted[coord_id] if coord_id in named_coords]
     unattributed = [txid for txid in cjtxs.keys() if txid not in all_attributed]
     coord_txs_named_sorted['unattributed'] = sorted(unattributed, key=lambda x: cjtxs[x]['broadcast_time'])
 
