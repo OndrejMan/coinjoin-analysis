@@ -142,9 +142,12 @@ def _spawn_initializer(target_path, sorted_cjtxs, initial_known_serial):
 def drop_random_fraction_dict(initial_data: dict, percent: int):
     if not 0 <= percent <= 100:
         raise ValueError("percent must be between 0 and 100")
-    keep_prob = 1 - percent / 100
-    return {x: None for x in initial_data
-            if secrets.randbelow(10000) < int(10000 * keep_prob)}
+    if percent == 100:
+        return {}
+    else:
+        keep_prob = 1 - percent / 100
+        return {x: None for x in initial_data
+                if secrets.randbelow(10000) < int(10000 * keep_prob)}
 
 
 def drop_part_fraction_dict(initial_data: dict, percent: int, coord_to_drop: None, from_end: bool = True):
@@ -153,13 +156,18 @@ def drop_part_fraction_dict(initial_data: dict, percent: int, coord_to_drop: Non
     for coord in list(initial_data.keys()):
         if coord_to_drop is not None and coord != coord_to_drop:
             continue
-        keep_len = int((1 - percent / 100) * len(initial_data[coord]))
-        if from_end:
-            # Drop ending transactions
-            initial_data[coord] = initial_data[coord][0:keep_len]
+
+        if percent == 100:
+            initial_data[coord] = []
         else:
-            # Drop front transactions
-            initial_data[coord] = initial_data[coord][len(initial_data[coord]) - keep_len : ]
+            keep_len = int((1 - percent / 100) * len(initial_data[coord]))
+            if from_end:
+                # Drop ending transactions
+                initial_data[coord] = initial_data[coord][0:keep_len]
+            else:
+                # Drop front transactions
+                initial_data[coord] = initial_data[coord][len(initial_data[coord]) - keep_len : ]
+
     return initial_data
 
 
