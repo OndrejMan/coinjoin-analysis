@@ -2920,7 +2920,17 @@ def main(argv=None):
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropsingle', False)
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropsingle2', True)
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop2', True)
-        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop3', omitt_coords, True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany2', omitt_coords, False)
+
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop3', 'tail, single coordinator', omitt_coords, True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany2', 'random, any coordinator', omitt_coords, True, True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropsingle4', 'random, single coordinator', omitt_coords, True)
+        # cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany5', 'random, any coordinator', omitt_coords, True, True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany', 'random, any coordinator', omitt_coords, True, True)
+        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany2', 'random, any coordinator', omitt_coords, True, True)
+
+        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__tail', 'tail, single coordinator', omitt_coords, True, False)
+        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomsingle', 'random, single coordinator', omitt_coords, True, False)
         exit(42)
 
         file_path = os.path.join(target_path, f"kruw_coord_discovery_analysis_taildrop_intermix_threshold__0.4.json")

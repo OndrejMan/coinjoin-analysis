@@ -5,11 +5,12 @@ from pathlib import Path
 from html import escape
 
 from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator, ScalarFormatter
+from matplotlib.ticker import MaxNLocator, ScalarFormatter, FuncFormatter, NullFormatter, LogLocator, FixedLocator
 import matplotlib.dates as mdates
 import mpl_toolkits.axisartist as AA
 
 import numpy as np
+from matplotlib.transforms import ScaledTranslation
 from scipy.optimize import minimize
 from scipy import stats
 
@@ -1906,7 +1907,7 @@ def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int,
                 fn_list = [v - fn_offset for v in fn_list]  # Remove potential offset from "no change" ("0") results
 
             fp_val = np.average(fp_list) if isinstance(fp_list, list) and fp_list else 0
-            fn_val = np.average(fp_list) if isinstance(fn_list, list) and fn_list else 0
+            fn_val = np.average(fn_list) if isinstance(fn_list, list) and fn_list else 0
             series[c][fp_string].append(fp_val)
             series[c][fn_string].append(fn_val)
 
@@ -1918,6 +1919,8 @@ def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int,
         fp_line, = plt.plot(x_vals, series[c][fp_string], label=f"{c} {fp_string}")
         # Use the same color for fn with dashed linestyle
         plt.plot(x_vals, series[c][fn_string], linestyle="--", label=f"{c} {fn_string}", color=fp_line.get_color(), alpha=0.7)
+        # Use the same color for fn with dashed linestyle
+        plt.plot(x_vals, series['unattributed'][fp_string], linestyle="--", label=f"unattributed", color='gray', alpha=0.5, linewidth=3)
 
     plt.xlabel("Removed attributions (%)")
     plt.ylabel("Count (#) or ratio (%)")
@@ -1931,47 +1934,100 @@ def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int,
     return series, x_vals
 
 
-def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: str, omitt_coords: list, log_scale: bool):
+def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: str, label_str: str, omitt_coords: list, log_scale: bool, join_coord_results: bool=False):
     file_path = os.path.join(target_path, f'{filename}.json')
     results = als.load_json_from_file(file_path)
     fp_string = 'fp'
     fn_string = 'fn'
 
+    assert len(results) == 1, f'Too many top-level keys detected'  # Expect only 1 threshold key
     for threshold in results:
         series_aggregated = {coord: {} for coord in results[threshold]}
+
+        # Option 1: drop random single / drop tail single  results[threshold][coord] contains different results to use
         for coord in results[threshold]:
             series, x_vals = plot_coord_attribution_stats(coord, 0, results[threshold][coord], target_path,
                                                                 fp_string, fn_string,
                                                                 f"{coord}_coord_discovery_analysis_nominal.png")
             series_aggregated[coord] = {
-                fp_string: [sum(vals) for vals in zip(*(series[c][fp_string] for c in series))],
-                fn_string: [sum(vals) for vals in zip(*(series[c][fn_string] for c in series))],
+                # fp_string - all but 'unattributed' coordinator
+                fp_string: [sum(vals) for vals in zip(*(series[c][fp_string] for c in series
+                                                        if c != 'unattributed'))],
+                fn_string: series[coord][fn_string],  # Only this coordinator
                 'unattributed': series['unattributed'][fp_string],
             }
 
-        plt.figure(figsize=(12, 7))
-        for coord in series_aggregated:
-            if coord not in omitt_coords:
-                fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
-                                    label=f"{coord} (misattributed)", alpha=0.7, linewidth=3)
-                # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
-                #                     label=f"{coord} (false positives)", alpha=0.7, linewidth=3)
-                # plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label=f"{coord} (false negatives)",
-                #          color=fp_line.get_color(),
-                #          alpha=1, linewidth=1)
-                # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
-                #          color=fp_line.get_color(), alpha=0.5,
-                #          linewidth=5)
+
+        if join_coord_results:
+            # Option 2: drop random any, series_aggregated[coord] contains same type of results as others
+            # (random selection of any coordinator's tx to drop) => aggregate results for even less noise
+            if 'unattributed' in series_aggregated:
+                num_coords = len(series_aggregated) - 1
+            else:
+                num_coords = len(series_aggregated)
+
+            series_aggregated_all = {'aggregated': {
+                    fp_string: [sum(vals)/num_coords for vals in zip(*(series_aggregated[c][fp_string]
+                                                                       for c in series_aggregated
+                                                                       if c != 'unattributed'))],
+                    fn_string: [sum(vals)/num_coords for vals in zip(*(series_aggregated[c][fn_string]
+                                                                       for c in series_aggregated))],
+                    'unattributed': [int(sum(vals)/num_coords) for vals in zip(*(series_aggregated[c]['unattributed']
+                                                                            for c in series_aggregated))],
+                }
+            }
+            series_aggregated = series_aggregated_all
+
+        plt.figure(figsize=(10, 5))
+        plt.rcParams.update({'font.size': 14})  # Set global font size
+        if join_coord_results:
+            fp_line, = plt.plot(x_vals, series_aggregated['aggregated'][fp_string], linestyle="-.",
+                                label=f"false positives (all)", alpha=0.7, linewidth=2)
+            plt.plot(x_vals, series_aggregated['aggregated'][fn_string], linestyle="--",
+                                label=f"false negatives (all)", alpha=0.7, linewidth=2)
+            plt.plot(x_vals, series_aggregated['aggregated']['unattributed'], linestyle='-',
+                     label=f"unattributed (all)",
+                     color='gray', alpha=0.5,
+                     linewidth=5)
+        else:
+            for coord in sorted(series_aggregated.keys()):
+                if coord not in omitt_coords:
+                    fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                                        label=f"{coord}", alpha=0.7, linewidth=2)
+                    # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                    #                     label=f"{coord} (misattributed)", alpha=1, linewidth=3)
+                    # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                    #                     label=f"{coord} (false positives)", alpha=0.7, linewidth=3)
+                    plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label=f"{coord} (false negatives)",
+                             color=fp_line.get_color(),
+                             alpha=1, linewidth=1)
+                    # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
+                    #          color=fp_line.get_color(), alpha=0.5,
+                    #          linewidth=3)
+
+        # Shift all lines up by 2 pixels
+        #nudge_lines_px_plt(dy_px=10)
 
         plt.xlabel("Removed attributions (%)")
-        plt.ylabel("Numer of transactions (log scale)")
-        plt.title(f"Number of misattributed transactions to % of removed attributions")
-#        plt.title(f"Number of false positives, false negatives and unattributed over % of removed attributions")
+        plt.ylabel(f"Number of transactions {'(log scale)' if log_scale else ''}")
+        plt.title(f"Misattributed transactions after removed attributions ({label_str})")
         plt.grid(True, which="both", linestyle=":", linewidth=0.5)
-        plt.legend(handlelength=4, handletextpad=0.8, ncol=1)
+        plt.legend(handlelength=2, handletextpad=0.8, ncol=1)
         #plt.legend(handlelength=4, handletextpad=0.8, ncol=1, fontsize=8)
+        #plt.xlim(0)
+        #plt.ylim(1)
         if log_scale:
             plt.yscale('log')
+            # plt.ylim(1, None)  # hide everything below 1
+
+            ymax = plt.gca().get_ylim()[1]
+            max_pow = int(np.floor(np.log10(ymax)))
+            major_ticks = [10 ** k for k in range(1, max_pow + 1)]  # 10, 100, ...
+
+            plt.gca().yaxis.set_major_locator(FixedLocator(major_ticks))
+            plt.gca().yaxis.set_minor_locator(LogLocator(base=10, subs=range(2, 10)))
+            plt.gca().yaxis.set_minor_formatter(NullFormatter())
+
         plt.gca().yaxis.set_major_formatter(ScalarFormatter())
         plt.ticklabel_format(style='plain', axis='y')
         plt.tight_layout()
