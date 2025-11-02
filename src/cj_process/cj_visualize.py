@@ -1953,7 +1953,8 @@ def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: s
                 # fp_string - all but 'unattributed' coordinator
                 fp_string: [sum(vals) for vals in zip(*(series[c][fp_string] for c in series
                                                         if c != 'unattributed'))],
-                fn_string: series[coord][fn_string],  # Only this coordinator
+                # Only this coordinator for FN
+                fn_string: series[coord][fn_string] if join_coord_results else [-x for x in series[coord][fn_string]],
                 'unattributed': series['unattributed'][fp_string],
             }
 
@@ -1978,61 +1979,128 @@ def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: s
             }
             series_aggregated = series_aggregated_all
 
-        plt.figure(figsize=(10, 5))
-        plt.rcParams.update({'font.size': 14})  # Set global font size
+        def plot_symlog(x_vals: list, series_aggregated: dict, join_coord_results: bool, omitt_coords: list):
+            plt.figure(figsize=(10, 5))
+            plt.rcParams.update({'font.size': 14})  # Set global font size
+            if join_coord_results:
+                fp_line, = plt.plot(x_vals, series_aggregated['aggregated'][fp_string], linestyle="-.",
+                                    label=f"false positives (all)", alpha=0.7, linewidth=2)
+                plt.plot(x_vals, series_aggregated['aggregated'][fn_string], linestyle="--",
+                         label=f"false negatives (all)", alpha=0.7, linewidth=2)
+                plt.plot(x_vals, series_aggregated['aggregated']['unattributed'], linestyle='-',
+                         label=f"unattributed (all)",
+                         color='gray', alpha=0.5,
+                         linewidth=5)
+            else:
+                plt.plot([0], [0], linestyle='-.', color='gray', label=f'(false positive)', alpha=0.7, linewidth=2)
+                plt.plot([0], [0], linestyle='--', color='gray', label=f'(false negative)', alpha=0.7, linewidth=2)
+                for coord in sorted(series_aggregated.keys()):
+                    if coord not in omitt_coords:
+                        fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                                            label='_nolegend_', alpha=0.7, linewidth=2)
+                        plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label='_nolegend_',
+                                 color=fp_line.get_color(),
+                                 alpha=0.7, linewidth=2)
+                        # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
+                        #          color=fp_line.get_color(), alpha=0.5,
+                        #          linewidth=3)
+
+                        # Fake plot to fill legend
+                        plt.plot([0], [0], linestyle='-', color=fp_line.get_color(), label=f'{coord}')
+
+            plt.xlabel("Removed attributions (%)")
+            plt.ylabel(f"Number of transactions {'(log scale)' if log_scale else ''}")
+            plt.title(f"Misattributed transactions after removed attributions ({label_str})")
+            plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+            plt.legend(handlelength=2, handletextpad=0.8, ncol=2, fontsize=10)
+
+            if log_scale:
+                plt.yscale('log' if join_coord_results else 'symlog')
+
+                # Symmetric log
+                def symlog_mag_formatter(y, pos):
+                    if y == 0:
+                        return "0"
+                    # show |y| and an arrow for direction
+                    magnitude = abs(y)
+                    # Compact formatting for large/small values: switch to scientific if needed
+                    if magnitude >= 100000 or magnitude < 1e-2:
+                        text = f"{magnitude:.0e}"
+                    else:
+                        # trim trailing zeros
+                        text = f"{magnitude:g}"
+                    # return f"{text} ↑" if y > 0 else f"{text} ↓"
+                    if magnitude == 1:
+                        return ""
+                    else:
+                        return f"{text}" if y > 0 else f"{text}"
+
+                plt.gca().yaxis.set_major_formatter(FuncFormatter(symlog_mag_formatter))
+
+            plt.tight_layout()
+            plt.savefig(Path(target_path, f'{filename}_aggregated.png'), dpi=200, bbox_inches="tight")
+            plt.close()
+
+
+        def plot_singleaxis(x_vals: list, series_aggregated: dict, join_coord_results: bool, omitt_coords: list):
+            plt.figure(figsize=(10, 5))
+            plt.rcParams.update({'font.size': 14})  # Set global font size
+            if join_coord_results:
+                fp_line, = plt.plot(x_vals, series_aggregated['aggregated'][fp_string], linestyle="-.",
+                                    label=f"false positives (all)", alpha=0.7, linewidth=3)
+                plt.plot(x_vals, series_aggregated['aggregated'][fn_string], linestyle="--",
+                                    label=f"false negatives (all)", alpha=0.7, linewidth=3)
+                plt.plot(x_vals, series_aggregated['aggregated']['unattributed'], linestyle='-',
+                         label=f"unattributed (all)",
+                         color='gray', alpha=0.5,
+                         linewidth=5)
+            else:
+                plt.plot([0], [0], linestyle='-.', color='gray', label=f'(false positive)', alpha=0.7, linewidth=2)
+                plt.plot([0], [0], linestyle='--', color='gray', label=f'(false negative)', alpha=0.7, linewidth=2)
+                for coord in sorted(series_aggregated.keys()):
+                    if coord not in omitt_coords:
+                        fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                                            label='_nolegend_', alpha=0.7, linewidth=2)
+                        # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                        #                     label=f"{coord} (misattributed)", alpha=1, linewidth=3)
+                        # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                        #                     label=f"{coord} (false positives)", alpha=0.7, linewidth=3)
+                        plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label='_nolegend_',
+                                 color=fp_line.get_color(),
+                                 alpha=0.7, linewidth=2)
+                        # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
+                        #          color=fp_line.get_color(), alpha=0.5,
+                        #          linewidth=3)
+
+                        # Fake plot to fill legend
+                        plt.plot([0], [0], linestyle='-', color=fp_line.get_color(), label=f'{coord}')
+
+            plt.xlabel("Removed attributions (%)")
+            plt.ylabel(f"Number of transactions {'(log scale)' if log_scale else ''}")
+            plt.title(f"Misattributed transactions after removed attributions ({label_str})")
+            plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+            plt.legend(handlelength=4, handletextpad=0.8, ncol=1)
+            if log_scale:
+                plt.yscale('log' if join_coord_results else 'symlog')
+
+                ymax = plt.gca().get_ylim()[1]
+                max_pow = int(np.floor(np.log10(ymax)))
+                major_ticks = [10 ** k for k in range(1, max_pow + 1)]  # 10, 100, ...
+
+                plt.gca().yaxis.set_major_locator(FixedLocator(major_ticks))
+                plt.gca().yaxis.set_minor_locator(LogLocator(base=10, subs=range(2, 10)))
+                plt.gca().yaxis.set_minor_formatter(NullFormatter())
+
+            plt.gca().yaxis.set_major_formatter(ScalarFormatter())
+            plt.ticklabel_format(style='plain', axis='y')
+            plt.tight_layout()
+            plt.savefig(Path(target_path, f'{filename}_aggregated.png'), dpi=200, bbox_inches="tight")
+            plt.close()
+
         if join_coord_results:
-            fp_line, = plt.plot(x_vals, series_aggregated['aggregated'][fp_string], linestyle="-.",
-                                label=f"false positives (all)", alpha=0.7, linewidth=2)
-            plt.plot(x_vals, series_aggregated['aggregated'][fn_string], linestyle="--",
-                                label=f"false negatives (all)", alpha=0.7, linewidth=2)
-            plt.plot(x_vals, series_aggregated['aggregated']['unattributed'], linestyle='-',
-                     label=f"unattributed (all)",
-                     color='gray', alpha=0.5,
-                     linewidth=5)
+            plot_singleaxis(x_vals, series_aggregated, join_coord_results, omitt_coords)
         else:
-            for coord in sorted(series_aggregated.keys()):
-                if coord not in omitt_coords:
-                    fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
-                                        label=f"{coord}", alpha=0.7, linewidth=2)
-                    # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
-                    #                     label=f"{coord} (misattributed)", alpha=1, linewidth=3)
-                    # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
-                    #                     label=f"{coord} (false positives)", alpha=0.7, linewidth=3)
-                    plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label=f"{coord} (false negatives)",
-                             color=fp_line.get_color(),
-                             alpha=1, linewidth=1)
-                    # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
-                    #          color=fp_line.get_color(), alpha=0.5,
-                    #          linewidth=3)
-
-        # Shift all lines up by 2 pixels
-        #nudge_lines_px_plt(dy_px=10)
-
-        plt.xlabel("Removed attributions (%)")
-        plt.ylabel(f"Number of transactions {'(log scale)' if log_scale else ''}")
-        plt.title(f"Misattributed transactions after removed attributions ({label_str})")
-        plt.grid(True, which="both", linestyle=":", linewidth=0.5)
-        plt.legend(handlelength=2, handletextpad=0.8, ncol=1)
-        #plt.legend(handlelength=4, handletextpad=0.8, ncol=1, fontsize=8)
-        #plt.xlim(0)
-        #plt.ylim(1)
-        if log_scale:
-            plt.yscale('log')
-            # plt.ylim(1, None)  # hide everything below 1
-
-            ymax = plt.gca().get_ylim()[1]
-            max_pow = int(np.floor(np.log10(ymax)))
-            major_ticks = [10 ** k for k in range(1, max_pow + 1)]  # 10, 100, ...
-
-            plt.gca().yaxis.set_major_locator(FixedLocator(major_ticks))
-            plt.gca().yaxis.set_minor_locator(LogLocator(base=10, subs=range(2, 10)))
-            plt.gca().yaxis.set_minor_formatter(NullFormatter())
-
-        plt.gca().yaxis.set_major_formatter(ScalarFormatter())
-        plt.ticklabel_format(style='plain', axis='y')
-        plt.tight_layout()
-        plt.savefig(Path(target_path, f'{filename}_aggregated.png'), dpi=200, bbox_inches="tight")
-        plt.close()
+            plot_symlog(x_vals, series_aggregated, join_coord_results, omitt_coords)
 
 
 def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list, target_path: str | Path):
