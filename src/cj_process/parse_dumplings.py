@@ -3467,7 +3467,12 @@ def main(argv=None):
             mix_ids = [f'wasabi2_{coord}' for coord in cjc.WASABI2_COORD_NAMES_ALL] if op.MIX_IDS == "" else op.MIX_IDS
             logging.info(f'Going to process following mixes: {mix_ids}')
             for coord in mix_ids:
-                cjvis.estimate_wallet_prediction_factor(target_path, coord)
+                if coord == 'wasabi2_zksnacks':
+                    predict_matrix = als.load_json_from_file(os.path.join(target_path, 'wallet_estimation_matrix_ww2zksnacks.json'))
+                else:
+                    predict_matrix = als.load_json_from_file(os.path.join(target_path, 'wallet_estimation_matrix_ww2kruw.json'))
+
+                cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, True)
         if op.CJ_TYPE == CoinjoinType.WW1:
             cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
 

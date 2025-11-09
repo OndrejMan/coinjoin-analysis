@@ -951,6 +951,8 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
                 new_month_indices.append(('year', next_month_index, f'{dates[i].year}-{dates[i].month:02}'))
         next_month_index = next_month_index + 1
 
+    ratios_list_every_cjtx = [num_all_inputs[offset] / (num_all_outputs[offset] / AVG_NUM_OUTPUTS) for offset in range(0, len(num_all_inputs))]  # Number of wallets in every
+
     ratios_list = []
     WINDOW_LEN = 10
     for offset in range(0, len(num_all_inputs) - WINDOW_LEN):
@@ -964,60 +966,133 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
         x1_opt, y1_opt = result.x
         AVG_NUM_INPUTS = AVG_NUM_OUTPUTS * (x1_opt / y1_opt)
         ratios_list.append(AVG_NUM_INPUTS)
-    ax.plot(ratios_list, label=f'L1 minimization, window={WINDOW_LEN}', alpha=0.5, color='black')
-    LARGE_AVG_WINDOW = 100
-    ratios_list_avg = als.compute_averages(ratios_list, LARGE_AVG_WINDOW)
-    ax.plot(range(LARGE_AVG_WINDOW, len(ratios_list_avg) + LARGE_AVG_WINDOW), ratios_list_avg,
-             label=f'Average of L1 minimization, window={LARGE_AVG_WINDOW}', color='red', alpha=0.5, linewidth=2)
-    ax.set_xlabel('coinjoin in time')
-    ax.set_ylabel('inputs prediction factor')
-
-    # Plot explict time ticks instead of
-    plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
 
     #
     # Compute number of predicted wallets
-    COLOR_WALLETS_INPUTS = 'green'
-    COLOR_WALLETS_OUTPUTS = 'red'
+    COLOR_WALLETS_INPUTS = 'red'
+    COLOR_WALLETS_OUTPUTS = 'green'
     predicted_wallets_list_inputs = []
+    predicted_wallets_list_inputs_cilo = []
+    predicted_wallets_list_inputs_cihi = []
     predicted_wallets_list_outputs = []
+    predicted_wallets_list_outputs_cilo = []
+    predicted_wallets_list_outputs_cihi = []
     # Select ratios to use
-    #used_prediction_ratios = ratios_list_every_cjtx
     used_prediction_ratios = ratios_list
-    #used_prediction_ratios = ratios_list_avg
+
+    LARGE_AVG_WINDOW = 100
+    ratios_list_avg = als.smooth_interval(ratios_list, LARGE_AVG_WINDOW)
 
     last_usable_factor = used_prediction_ratios[0]
-    for i in range(0, len(sorted_cj_time)):
-        # Use computed prediction factor if available
-        if list_get(used_prediction_ratios, i, -1) != -1:
-            predicted_num_wallets = int(round(num_all_inputs[i] / used_prediction_ratios[i]))
-            last_usable_factor = ratios_list[i]
+    if prediction_matrix:
+        for i in range(0, len(sorted_cj_time)):
+            num_inputs = len(all_data['coinjoins'][sorted_cj_time[i]['txid']]['inputs'].keys())
+            predicted_wallets_list_inputs.append(prediction_matrix['inputs'][str(num_inputs)]['N_hat'])
+            predicted_wallets_list_inputs_cilo.append(prediction_matrix['inputs'][str(num_inputs)]['ci_lo'])
+            predicted_wallets_list_inputs_cihi.append(prediction_matrix['inputs'][str(num_inputs)]['ci_hi'])
+
+            num_outputs = len(all_data['coinjoins'][sorted_cj_time[i]['txid']]['outputs'].keys())
+            predicted_wallets_list_outputs.append(prediction_matrix['outputs'][str(num_outputs)]['N_hat'])
+            predicted_wallets_list_outputs_cilo.append(prediction_matrix['outputs'][str(num_outputs)]['ci_lo'])
+            predicted_wallets_list_outputs_cihi.append(prediction_matrix['outputs'][str(num_outputs)]['ci_hi'])
         else:
-            # Last last known if factor no longer computed (due to size of average window)
-            predicted_num_wallets = int(round(num_all_inputs[i] / last_usable_factor))
-        predicted_wallets_list_inputs.append(predicted_num_wallets)
-        predicted_wallets_list_outputs.append(int(round(num_all_outputs[i] / AVG_NUM_OUTPUTS)))
+            # Use computed prediction factor if available
+            if list_get(used_prediction_ratios, i, -1) != -1:
+                predicted_num_wallets = int(round(num_all_inputs[i] / used_prediction_ratios[i]))
+                last_usable_factor = ratios_list[i]
+            else:
+                # Last last known if factor no longer computed (due to size of average window)
+                predicted_num_wallets = int(round(num_all_inputs[i] / last_usable_factor))
+            predicted_wallets_list_inputs.append(predicted_num_wallets)
+            predicted_wallets_list_outputs.append(int(round(num_all_outputs[i] / AVG_NUM_OUTPUTS)))
+
+    # Compute averages
+    predicted_wallets_inputs_avg = als.smooth_interval(predicted_wallets_list_inputs, LARGE_AVG_WINDOW)
+    predicted_wallets_inputs_cilo_avg = als.smooth_interval(predicted_wallets_list_inputs_cilo, LARGE_AVG_WINDOW) if predicted_wallets_list_inputs_cilo else None
+    predicted_wallets_inputs_cihi_avg = als.smooth_interval(predicted_wallets_list_inputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_inputs_cihi else None
+    predicted_wallets_outputs_avg = als.smooth_interval(predicted_wallets_list_outputs, LARGE_AVG_WINDOW)
+    predicted_wallets_outputs_cilo_avg = als.smooth_interval(predicted_wallets_list_outputs_cilo, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cilo else None
+    predicted_wallets_outputs_cihi_avg = als.smooth_interval(predicted_wallets_list_outputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cihi else None
+
+    fig_single, ax = plt.subplots(figsize=(10, 4))  # Figure for single plot
+    # Plot explict time ticks instead of default ones
+    plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
+    ax.set_xlabel('coinjoin in time')
 
     PLOT_NUM_WALLETS = True
+    FULL_LEGEND = False
     if PLOT_NUM_WALLETS:
-        predicted_wallets_inputs_avg = als.compute_averages(predicted_wallets_list_inputs, LARGE_AVG_WINDOW)
-        predicted_wallets_outputs_avg = als.compute_averages(predicted_wallets_list_outputs, LARGE_AVG_WINDOW)
-        ax2 = ax.twinx()
-        ax2.plot(predicted_wallets_list_inputs,
-                 label=f'Predicted # wallets (inputs)', color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
-        ax2.plot(predicted_wallets_inputs_avg,
-                 label=f'Average predicted # wallets (inputs), window={LARGE_AVG_WINDOW}', color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
-        # Artificial entry with same settings to have legend complete on ax
-        ax.plot(predicted_wallets_list_inputs[0], label=f'Predicted # wallets (inputs)', color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
-        ax.plot(predicted_wallets_inputs_avg[0],
-                 label=f'Average predicted # wallets, window={LARGE_AVG_WINDOW}', color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
+        if plot_inputs_prediction:
+            ax.plot(predicted_wallets_list_inputs,
+                     label='Predicted # wallets (inputs)' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_inputs_avg,
+                     label=f'Average predicted # wallets (inputs), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
+            if predicted_wallets_inputs_cilo_avg:
+                # ax.fill_between(range(LARGE_AVG_WINDOW, len(predicted_wallets_inputs_cilo_avg) + LARGE_AVG_WINDOW), predicted_wallets_inputs_cilo_avg, predicted_wallets_inputs_cihi_avg, alpha=0.3, color=COLOR_WALLETS_INPUTS)
+                ax.plot(predicted_wallets_inputs_cilo_avg,
+                         label=f'Average predicted # wallets (inputs, CI lo), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_INPUTS, alpha=0.3, linewidth=1, linestyle=':')
+                ax.plot(predicted_wallets_inputs_cihi_avg,
+                         label=f'Average predicted # wallets (inputs, CI hi), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_INPUTS, alpha=0.3, linewidth=1, linestyle=':')
 
-        ax2.set_ylabel('number of wallets', color=COLOR_WALLETS_INPUTS)
-        ax2.tick_params(axis='y', colors=COLOR_WALLETS_INPUTS)
+            # Artificial entry with same settings to have legend complete on ax
+            ax.plot(predicted_wallets_list_inputs[0], label=f'Predicted # wallets (inputs, every coinjoin)',
+                    color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_inputs_avg[0],
+                     label=f'Average predicted # wallets (inputs, window={LARGE_AVG_WINDOW})', color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
+
+        if plot_outputs_prediction:
+            ax.plot(predicted_wallets_list_outputs,
+                     label=f'Predicted # wallets (outputs)' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_OUTPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_outputs_avg,
+                     label=f'Average predicted # wallets (outputs), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_OUTPUTS, alpha=0.7, linewidth=1)
+            if predicted_wallets_outputs_cilo_avg:
+                # ax.fill_between(range(LARGE_AVG_WINDOW, len(predicted_wallets_outputs_cilo_avg) + LARGE_AVG_WINDOW), predicted_wallets_outputs_cihi_avg, predicted_wallets_outputs_cilo_avg, color=COLOR_WALLETS_OUTPUTS, alpha=0.3)
+                ax.plot(predicted_wallets_outputs_cilo_avg,
+                         label=f'Average predicted # wallets (outputs, CI lo), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_OUTPUTS, alpha=0.3, linewidth=1, linestyle=':')
+                ax.plot(predicted_wallets_outputs_cihi_avg,
+                         label=f'Average predicted # wallets (outputs, CI hi), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_OUTPUTS, alpha=0.3, linewidth=1, linestyle=':')
+
+            # Artificial entry with same settings to have legend complete on ax
+            ax.plot(predicted_wallets_list_outputs[0], label=f'Predicted # wallets (outputs, every coinjoin)',
+                    color=COLOR_WALLETS_OUTPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_outputs_avg[0],
+                     label=f'Average predicted # wallets (outputs, window={LARGE_AVG_WINDOW})', color=COLOR_WALLETS_OUTPUTS, alpha=0.7, linewidth=1)
+
+        if predicted_wallets_inputs_cilo_avg:
+            # ax.fill_between(range(LARGE_AVG_WINDOW, len(predicted_wallets_inputs_cilo_avg) + LARGE_AVG_WINDOW), predicted_wallets_inputs_cilo_avg, predicted_wallets_inputs_cihi_avg, alpha=0.3, color=COLOR_WALLETS_INPUTS)
+            ax.plot(predicted_wallets_inputs_cilo_avg[0],
+                     label=f'Confidence interval 5% - 95%',
+                    color='gray', alpha=0.3, linewidth=1, linestyle=':')
+
+        ax.yaxis.set_label_position("right")
+        ax.yaxis.tick_right()
+        ax.set_ylabel('number of predicted wallets')
+        #ax.tick_params(axis='y', colors=COLOR_WALLETS_INPUTS)
+
+
+    PLOT_INPUTS2OUTPUTS_FACTOR = False
+    if PLOT_INPUTS2OUTPUTS_FACTOR:
+        ax2 = ax.twinx()
+
+        ax2.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
+        ax2.plot(ratios_list, label=f'L1 minimization, window={WINDOW_LEN}', alpha=0.5, color='black')
+        ax2.plot(range(LARGE_AVG_WINDOW, len(ratios_list_avg) + LARGE_AVG_WINDOW), ratios_list_avg,
+             label=f'Average of L1 minimization, window={LARGE_AVG_WINDOW}', color='red', alpha=0.5, linewidth=2)
+        ax2.set_ylabel('inputs prediction factor')
+        ax2.yaxis.set_label_position("left")
+        ax2.yaxis.tick_left()
 
     # Finalize graph
     plt.subplots_adjust(bottom=0.15)
-    ax.set_title(f'Wallets prediction factor variability: {mix_id}')
+    ax.set_title(f'Number of predicted participating wallets: {mix_id}')
     ax.legend(loc='upper left')
     save_path = os.path.join(target_load_path, f'{mix_id}_inputs_prediction_factor_dynamics')
     plt.savefig(f'{save_path}.png', dpi=300)
@@ -1026,15 +1101,21 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
     #plt.show()
     plt.close()
 
-    predicted_wallets = []
+    predicted_wallets = {}
     last_usable_factor = used_prediction_ratios[len(used_prediction_ratios) - 1]
     for i in range(0, len(sorted_cj_time)):
-        predicted_wallets.append({'txid': sorted_cj_time[i]['txid'],
-                                  'num_wallets': predicted_wallets_list_inputs[i],
+        predicted_wallets[sorted_cj_time[i]['txid']] = {'txid': sorted_cj_time[i]['txid'],
+                                  'num_wallets': predicted_wallets_list_outputs[i],
+                                  'num_wallets_by_inputs': predicted_wallets_list_inputs[i],
+                                  'num_wallets_by_inputs_cilo': predicted_wallets_list_inputs_cilo[i] if predicted_wallets_list_inputs_cilo else None,
+                                  'num_wallets_by_inputs_cihi': predicted_wallets_list_inputs_cihi[i] if predicted_wallets_list_inputs_cihi else None,
+                                  'num_wallets_by_outputs': predicted_wallets_list_outputs[i],
+                                  'num_wallets_by_outputs_cilo': predicted_wallets_list_outputs_cilo[i] if predicted_wallets_list_outputs_cilo else None,
+                                  'num_wallets_by_outputs_cihi': predicted_wallets_list_outputs_cihi[i] if predicted_wallets_list_outputs_cihi else None,
                                   'separate_ctx_input_factor': list_get(ratios_list_every_cjtx, i, -1),
                                   f'L1_{WINDOW_LEN}_input_factor': list_get(ratios_list, i, last_usable_factor),
                                   f'L1_{WINDOW_LEN}_avg_{LARGE_AVG_WINDOW}_input_factor': list_get(ratios_list_avg, i, last_usable_factor)
-                                  })
+                                  }
     als.save_json_to_file_pretty(f'{save_path}.json', {'mix_id':mix_id, 'predictions': predicted_wallets})
 
     return ratios_list
@@ -2158,7 +2239,7 @@ def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list
     plt.title("Daily coinjoin transactions attributed by different ground-truth datasets (post-zkSNACKs)")
     #plt.xlabel("Date")
     plt.ylabel("Coinjoins per day")
-    plt.legend(loc="upper right")
+    plt.legend(loc="upper right", fontsize=LEGEND_FONT_SIZE)
     plt.grid(True, linewidth=0.5, alpha=0.4)
     plt.tight_layout()
     plt.savefig(os.path.join(target_path, 'crawl_datasets.png'), dpi=200, bbox_inches="tight")

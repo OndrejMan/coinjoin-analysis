@@ -726,6 +726,11 @@ def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, prem
     return coinjoins_relative_order
 
 
+def smooth_interval(lst, window_size):
+    #return compute_medians(lst, window_size)
+    return compute_averages(lst, window_size)
+
+
 def compute_averages(lst, window_size):
     averages = []
     window_sum = sum(lst[:window_size])  # Initialize the sum of the first window
@@ -738,6 +743,20 @@ def compute_averages(lst, window_size):
         averages.append(window_sum / window_size)  # Compute and store the average of the current window
 
     return averages
+
+
+def compute_medians(lst, window_size):
+    if window_size < 1:
+        raise ValueError("window_size must be >= 1")
+    if window_size > len(lst):
+        return []
+
+    medians = []
+    for i in range(len(lst) - window_size + 1):
+        window = lst[i:i + window_size]
+        medians.append(median(window))
+
+    return medians
 
 
 def get_output_name_string(txid, index):
