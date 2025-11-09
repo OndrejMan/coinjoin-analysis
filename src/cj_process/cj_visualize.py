@@ -913,9 +913,10 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
 
 
 
-def estimate_wallet_prediction_factor(base_path, mix_id):
+def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict=None,
+                                      plot_inputs_prediction: bool=True, plot_outputs_prediction: bool=True):
     # REFACTOR - mixed analysis and plotting
-    AVG_NUM_INPUTS, AVG_NUM_OUTPUTS = als.get_wallets_prediction_ratios(mix_id)
+    AVG_NUM_INPUTS, AVG_NUM_OUTPUTS = als.get_wallets_prediction_ratios(mix_id, prediction_matrix)
 
     target_load_path = os.path.join(base_path, mix_id)
     all_data = als.load_coinjoins_from_file(target_load_path, None, True)
@@ -935,11 +936,6 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
     def objective_linear(params, x_window, y_window):
         x1, y1 = params
         return np.sum(np.abs(x_window / x1 - y_window / y1))
-
-    fig_single, ax = plt.subplots(figsize=(10, 4))  # Figure for single plot
-
-    ratios_list_every_cjtx = [num_all_inputs[offset] / (num_all_outputs[offset] / AVG_NUM_OUTPUTS) for offset in range(0, len(num_all_inputs))]  # Number of wallets in every
-    ax.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
 
     # Store index of coinjoins when it changes months/years
     new_month_indices = []

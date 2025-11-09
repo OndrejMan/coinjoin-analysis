@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 import sqlite3
 import logging
 from pathlib import Path
-
+from statistics import median
 #import msgpack
 import orjson
 import json
@@ -199,7 +199,7 @@ def get_inputs_type_list(coinjoins, sorted_cj_time, event_type, in_or_out: str, 
 
 
 
-def get_wallets_prediction_ratios(mix_id: str):
+def get_wallets_prediction_ratios(mix_id: str, prediction_matrix: dict=None):
     # NOTE: Based on real wallet experiments, average number of outputs (AVG_NUM_OUTPUTS) is significantly more
     # independent of number of coins in wallet and stable => take it as fixed point and compute synthetic value for AVG_NUM_INPUTS
 
@@ -219,12 +219,18 @@ def get_wallets_prediction_ratios(mix_id: str):
         #AVG_NUM_INPUTS = 3.65  # real value taken from kruw.io as38 experiment (use for kruw)
         AVG_NUM_INPUTS = 4.44 #  synthetic value minimizing euclidean distance for  kruw.io for interval 02/2025 if AVG_NUM_OUTPUTS = 4.92
         #AVG_NUM_INPUTS = 4.03 #  synthetic value minimizing euclidean distance for  kruw.io for interval 03/2025 if AVG_NUM_OUTPUTS = 4.92
+        if prediction_matrix:
+            AVG_NUM_INPUTS = prediction_matrix['inputs']['1']['mu_hat']
+            AVG_NUM_OUTPUTS = prediction_matrix['outputs']['1']['mu_hat']
 
     # zksnacks
     if 'zksnacks' in mix_id:
         AVG_NUM_OUTPUTS = 4.17 # real value taken from zksnacks as25 experiment (use for zksnacks)
         AVG_NUM_INPUTS = 2.72  # real value taken from zksnacks as25 experiment (use for zksnacks)
 #        AVG_NUM_OUTPUTS = 2.91 # synthetic median value minimizing euclidean distance between output and input factors for zksnacks if AVG_NUM_INPUTS = 2.72
+        if prediction_matrix:
+            AVG_NUM_INPUTS = prediction_matrix['inputs']['1']['mu_hat']
+            AVG_NUM_OUTPUTS = prediction_matrix['outputs']['1']['mu_hat']
 
     # Wasabi 1.x
     if 'wasabi1' in mix_id:
