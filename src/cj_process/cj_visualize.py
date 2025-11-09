@@ -1094,7 +1094,7 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
     plt.subplots_adjust(bottom=0.15)
     ax.set_title(f'Number of predicted participating wallets: {mix_id}')
     ax.legend(loc='upper left')
-    save_path = os.path.join(target_load_path, f'{mix_id}_inputs_prediction_factor_dynamics')
+    save_path = os.path.join(target_load_path, f'{mix_id}_wallets_predictions_dynamics')
     plt.savefig(f'{save_path}.png', dpi=300)
     plt.savefig(f'{save_path}.pdf', dpi=300)
     logging.info(f'estimate_wallet_prediction_factor() saved into {save_path}.png')
