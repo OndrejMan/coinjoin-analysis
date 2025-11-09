@@ -1042,32 +1042,69 @@ def estimate_wallets_from_inputs(
     return result
 
 
-def estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str, cj_stats2: dict, prefix2: str, color2: str):
+def precompute_wallet_nums_stats(cj_stats: dict, distrib_key: str, values_range: list, drop_front_offset: int=0,
+                                 alpha: float=0.05, clip_min: float=1.0):
+    """
+    Precomputes predictions for wallet numbers for the given observed distribution of number of inputs/outputs
+    during client-side experiments.
+    :param cj_stats: all data collected during client-side experiments
+    :param distrib_key: string 'number_inputs' or 'number_outputs' identifying which distribution we want to process
+    :param values_range: range of values we want to precompute wallet prediction for
+    :param drop_front_offset: if required, first drop_front_offset coinjoins are dropped from distribution
+            of each session (rationale: if we start with single utxo, then wallet cannot register more. Dropping will
+            remove coinjoins till wallet has enough utxos to select from)
+    :param alpha: confidence interval level
+    :param clip_min: clipping minimum level
+    :return: directory with precomputed values
+    """
+    results = {}
+    num_inputs = []
+    for session in cj_stats[distrib_key]:
+        num_inputs.extend(cj_stats[distrib_key][session][drop_front_offset:])
+    print(f'precompute_wallet_nums_stats() computed from {len(num_inputs)} dataset size')
+    for Y in values_range:
+        results[Y] = estimate_wallets_from_inputs(num_inputs, int(Y), alpha=alpha, clip_min=clip_min)
+        print(f'  {Y}:\t N={results[Y]["N_hat"]:.1f} wallets, 95% CI [{results[Y]["ci_lo"]:.1f}, {results[Y]["ci_hi"]:.1f}] (Wald CI via delta method using our measured K)')
+
+    return results
+
+
+def create_wallet_estimation_matrix(cj_stats: dict, values_range: list):
+    full_matrix = {}
+    clip_min = 1.0
+    for alpha in [0.1, 0.05, 0.01]:
+        full_matrix[alpha] = {}
+        DROP_INITIAL_COINJOINS_INPUTS = 5  # Drop first X coinjoins from each session from inputs till wallet does not have enough utxos
+        DROP_INITIAL_COINJOINS_OUTPUTS = 0  # No dropping from outputs which is more stable from first coinjoin
+        full_matrix[alpha]['inputs'] = precompute_wallet_nums_stats(cj_stats, 'num_inputs', values_range,
+                                                                    DROP_INITIAL_COINJOINS_INPUTS, alpha, clip_min)
+        full_matrix[alpha]['outputs'] = precompute_wallet_nums_stats(cj_stats, 'num_outputs', values_range,
+                                                                     DROP_INITIAL_COINJOINS_OUTPUTS, alpha, clip_min)
+    return full_matrix
+
+def visualize_estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str, cj_stats2: dict, prefix2: str, color2: str, alpha: float=0.05, clip_min: float=1.0):
     # Estimate wallets estimation bounds
     plt.figure(figsize=(10, 6))
 
+    def plot_wallets_stats(values_range, N_hat_list, ci_hi_list, ci_lo_list, line_color: str, prefix: str):
+        plt.plot(values_range, N_hat_list, label=f"Num. wallets point estimate ({prefix})", color=line_color, alpha=0.7, linewidth=3)
+        plt.plot(values_range, ci_hi_list, label=f"Upper bound ({prefix}) (CI=95%)", linestyle='-.', color=line_color, alpha=0.7)
+        plt.plot(values_range, ci_lo_list, label=f"Lower bound ({prefix}) (CI=95%)", linestyle='--', color=line_color, alpha=0.7)
+
     def compute_and_plot(cj_stats: dict, distrib_key: str, line_color: str, prefix: str):
-        print(prefix)
-        num_inputs = []
-        for session in cj_stats[distrib_key].keys():
-            num_inputs.extend(cj_stats[distrib_key][session])
-        # Compute across Y = 20..500
-        Ys: List[int] = list(range(20, 501, 10))
+        # Compute across Y = 10..700
+        values_range = list(range(10, 701, 1))
+        precomputed = precompute_wallet_nums_stats(cj_stats, distrib_key, values_range, 0, alpha, clip_min)
+        Ys = list(precomputed.keys())
         N_hat_list: List[float] = []
         ci_lo_list: List[float] = []
         ci_hi_list: List[float] = []
-
         for Y in Ys:
-            out = estimate_wallets_from_inputs(num_inputs, int(Y), alpha=0.05, clip_min=1.0)
-            N_hat_list.append(out["N_hat"])
-            ci_lo_list.append(out["ci_lo"])
-            ci_hi_list.append(out["ci_hi"])
-            print(f'  {Y}:\t N={out["N_hat"]:.1f} wallets, 95% CI [{out["ci_lo"]:.1f}, {out["ci_hi"]:.1f}] (Wald CI via delta method using our measured K)')
-
-        plt.plot(Ys, N_hat_list, label=f"Num. wallets point estimate ({prefix}, m={len(num_inputs)})", color=line_color, alpha=0.7, linewidth=3)
-        plt.plot(Ys, ci_hi_list, label=f"Upper bound ({prefix}) (CI=95%)", linestyle='-.', color=line_color, alpha=0.7)
-        plt.plot(Ys, ci_lo_list, label=f"Lower bound ({prefix}) (CI=95%)", linestyle='--', color=line_color, alpha=0.7)
-
+            N_hat_list.append(precomputed[Y]["N_hat"])
+            ci_lo_list.append(precomputed[Y]["ci_lo"])
+            ci_hi_list.append(precomputed[Y]["ci_hi"])
+        plot_wallets_stats(values_range, N_hat_list, ci_lo_list, ci_hi_list, line_color, prefix)
+        return precomputed
 
     compute_and_plot(cj_stats1, 'num_inputs', 'red', f'{prefix1}_in')
     compute_and_plot(cj_stats1, 'num_outputs', 'green', f'{prefix1}_out')
@@ -1100,7 +1137,14 @@ if __name__ == "__main__":
 
     all38_stats = als.load_json_from_file(os.path.join(base_path, 'as38', 'as38_all_stats.json'))
     all25_stats = als.load_json_from_file(os.path.join(base_path, 'as25', 'as25_all_stats.json'))
-    estimate_wallet_bounds(all25_stats, 'as25', 'lightcoral', all38_stats, 'as38', 'royalblue')
+    visualize_estimate_wallet_bounds(all25_stats, 'as25', 'lightcoral', all38_stats, 'as38', 'royalblue')
+
+    # Precompute and save wallet prediction matrix
+    values_range = list(range(1, 701, 1))
+    full_matrix_as25 = create_wallet_estimation_matrix(all25_stats, values_range)
+    als.save_json_to_file_pretty(os.path.join(base_path, 'wallet_estimation_matrix_ww2zksnacks.json'), full_matrix_as25)
+    full_matrix_as38 = create_wallet_estimation_matrix(all38_stats, values_range)
+    als.save_json_to_file_pretty(os.path.join(base_path, 'wallet_estimation_matrix_ww2kruw.json'), full_matrix_as38)
 
 
     all38_stats, all38 = full_analyze_as38_202503(base_path)
