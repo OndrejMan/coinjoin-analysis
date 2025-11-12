@@ -1826,11 +1826,6 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
         .cjseg .io-col .under { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
 
         .cjseg .foot { margin-top: 8px; color: var(--muted); font-size: 0.85rem; }
-        @media (prefers-color-scheme: dark) {
-          .cjseg { --fg:#e5e7eb; --bg:#0b0b0b; --muted:#9aa0a6; --line:#2a2a2a; --accent:#e5e7eb; }
-          .cjseg .card { background: #121212; }
-          .cjseg .io-col { background: #121212; }
-        }
         </style>
         '''
 
