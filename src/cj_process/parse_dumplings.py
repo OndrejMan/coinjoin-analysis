@@ -1484,6 +1484,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
     print(f'Going to process the following subfolders of {target_path}: {files}')
     # Load false positives
     false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_path, 'false_cjtxs.json'))
+    SM.print(f'Number of false positives initially (false_cjtxs.json): {len(set(false_cjtxs))}')
 
     # Detected false positives candidates. 3m_xxx contains subset of txs from last 3 months.
     no_remix_all = {'recent__inputs_noremix': {}, 'recent__outputs_noremix': {}, 'recent__both_noremix': {},
@@ -2928,12 +2929,15 @@ def main(argv=None):
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_taildrop3', 'tail, single coordinator', omitt_coords, True)
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany2', 'random, any coordinator', omitt_coords, True, True)
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropsingle4', 'random, single coordinator', omitt_coords, True)
-        # cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany5', 'random, any coordinator', omitt_coords, True, True)
+        #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis_randomdropany5', 'random, any coordinator', omitt_coords, True, True)
         #cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany', 'random, any coordinator', omitt_coords, True, True)
-        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany2', 'random, any coordinator', omitt_coords, True, True)
 
-        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__tail', 'tail, single coordinator', omitt_coords, True, False)
-        cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomsingle', 'random, single coordinator', omitt_coords, True, False)
+        # cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany2', 'random, any coordinator', omitt_coords, True, True)
+        # cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__tail', 'tail, single coordinator', omitt_coords, True, False)
+        # cjviz.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomsingle', 'random, single coordinator', omitt_coords, True, False)
+
+        #cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__front', 'front, single coordinator', omitt_coords, True, False)
+
         exit(42)
 
         file_path = os.path.join(target_path, f"kruw_coord_discovery_analysis_taildrop_intermix_threshold__0.4.json")
@@ -2941,9 +2945,9 @@ def main(argv=None):
             results_all = als.load_json_from_file(file_path)
             results = results_all
             # results = results_all['intermix_threshold_0.4']
-            cjviz.plot_coord_attribution_stats(results, target_path, "fp", "fn",
+            cjvis.plot_coord_attribution_stats(results, target_path, "fp", "fn",
                                                f"kruw_coord_discovery_analysis_taildrop_intermix_threshold__0.4_nominal.png")
-            cjviz.plot_coord_attribution_stats(results, target_path, "fp_ratio",
+            cjvis.plot_coord_attribution_stats(results, target_path, "fp_ratio",
                                                "fn_ratio", f"kruw_coord_discovery_analysis_taildrop_intermix_threshold__0.4_ratio.png")
         else:
             logging.warning(f'File {file_path} does not exists')
@@ -3475,7 +3479,9 @@ def main(argv=None):
                 else:
                     predict_matrix = als.load_json_from_file(os.path.join(target_path, 'wallet_estimation_matrix_ww2kruw.json'))
 
+                # Wallet predictions based on outputs
                 cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, True)
+
         if op.CJ_TYPE == CoinjoinType.WW1:
             cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
 
@@ -3517,7 +3523,7 @@ def main(argv=None):
 
             # Analyze overlap of crawled transactions
             coord_txs_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord.json'))
-            cjviz.plot_mapping_datasets_stats(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], os.path.join(target_path, 'wasabi2_others'))
+            cjvis.plot_mapping_datasets_stats(cjtxs, coord_txs_mapping, ['crawl_wasabist', 'crawl_wabisator', 'crawl_crocsapi'], os.path.join(target_path, 'wasabi2_others'))
             #als.save_json_to_file(os.path.join(target_path, 'wasabi2_others', 'coinjoin_tx_info_2.json'), cjtxs)
 
 
@@ -3547,11 +3553,11 @@ def main(argv=None):
             #     cja._eval_drop_attributions_single_coord,
             #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.TAIL),
             #     'coord_discovery_analysis___drop__tail')
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
-            #     'coord_discovery_analysis___drop__front')
+            cja.wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'),
+                cja._eval_drop_attributions_single_coord,
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
+                'coord_discovery_analysis___drop__front')
 
             # Drop random transactions from ground truth attribution of any coordinator
             # Note: As we are dropping from any coordinator, then every coordinator tested in parallel
@@ -3569,11 +3575,11 @@ def main(argv=None):
             #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 2)), cja.DROP_TYPE.RANDOM_ANY),
             #     'coord_discovery_analysis___drop__randomany')
 
-            cja.wasabi_detect_coordinators_evaluation_parallel(
-                os.path.join(target_path, 'wasabi2_others'),
-                cja._eval_drop_attributions_single_coord,
-                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 10)), cja.DROP_TYPE.RANDOM_SINGLE),
-                'coord_discovery_analysis___drop__randomsingle')
+            # cja.wasabi_detect_coordinators_evaluation_parallel(
+            #     os.path.join(target_path, 'wasabi2_others'),
+            #     cja._eval_drop_attributions_single_coord,
+            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 10)), cja.DROP_TYPE.RANDOM_SINGLE),
+            #     'coord_discovery_analysis___drop__randomsingle')
 
             # Analyze impact of threshold for intermix attributions
             # cja.wasabi_detect_coordinators_evaluation_parallel(
