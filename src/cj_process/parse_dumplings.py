@@ -17,11 +17,12 @@ from pathlib import Path
 
 import pandas as pd
 import numpy as np
+
 from cj_process.cj_analysis import get_output_name_string, get_input_name_string
 from cj_process import cj_analysis as als
 from cj_process import cj_consts as cjc
 from cj_process import cj_assesment as cja
-from cj_process import cj_visualize as cjviz
+import cj_process.cj_visualize as cjvis
 import argparse
 import gc
 import time
@@ -33,7 +34,7 @@ from typing import List
 #import tracemalloc
 
 
-import cj_process.cj_visualize as cjvis
+
 from cj_process.cj_consts import VerboseInOutInfoInLineSeparator, WHIRLPOOL_FUNDING_TXS, SATS_IN_BTC, \
     WHIRLPOOL_POOL_NAMES_ALL, WHIRLPOOL_POOL_SIZES
 from cj_process.cj_structs import CJ_TX_CHECK, MIX_PROTOCOL, CLUSTER_INDEX, MIX_EVENT_TYPE, SM, \
@@ -2490,6 +2491,7 @@ class DumplingsParseOptions:
     ANALYSIS_BYBIT_HACK = False
     ANALYSIS_OUTPUT_CLUSTERS = False
     ANALYSIS_WALLET_PREDICTION = False
+    ANALYSIS_WALLET_PREDICTION_EXT = False
     ANALYZE_DETECT_COORDINATORS_ALG = False
     ANALYZE_DETECT_COORDINATORS_ALG_DETAILED = False
 
@@ -2589,6 +2591,7 @@ class DumplingsParseOptions:
         self.ANALYSIS_BYBIT_HACK = False
         self.ANALYSIS_OUTPUT_CLUSTERS = False
         self.ANALYSIS_WALLET_PREDICTION = False
+        self.ANALYSIS_WALLET_PREDICTION_EXT = False
         self.ANALYZE_DETECT_COORDINATORS_ALG = False
         self.ANALYZE_DETECT_COORDINATORS_ALG_DETAILED = False
 
@@ -3475,6 +3478,12 @@ def main(argv=None):
                 cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, True)
         if op.CJ_TYPE == CoinjoinType.WW1:
             cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
+
+
+    if op.ANALYSIS_WALLET_PREDICTION_EXT:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            cja.analyze_impact_session_tx_removed_predictions(op, target_path)
+
 
 
     # Combine information from already downloaded dumplings transactions and crawled ones

@@ -13,9 +13,10 @@ from typing import List
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+from matplotlib import pyplot as plt
 
-from cj_process import cj_visualize as cjviz
-
+from cj_process import cj_visualize as cjvis
+from cj_process import cj_consts as cjc
 from cj_process import cj_analysis as als
 
 def analyze_coordinator_detection(cjtxs: dict, tx_list: dict, coords: List):
@@ -428,9 +429,9 @@ def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, wor
             if os.path.exists(file_path):
                 results_all = als.load_json_from_file(file_path)
                 results = results_all
-                cjviz.plot_coord_attribution_stats(coord, len(initial_known_txs[coord]), results, target_path, "fp", "fn",
+                cjvis.plot_coord_attribution_stats(coord, len(initial_known_txs[coord]), results, target_path, "fp", "fn",
                                                    f"{coord}_{experiment_name_th}_nominal.png")
-                cjviz.plot_coord_attribution_stats(coord, len(initial_known_txs[coord]), results, target_path, "fp_ratio",
+                cjvis.plot_coord_attribution_stats(coord, len(initial_known_txs[coord]), results, target_path, "fp_ratio",
                                                        "fn_ratio", f"{coord}_{experiment_name_th}_ratio.png")
             else:
                 logging.warning(f'File {file_path} does not exists')
@@ -443,3 +444,40 @@ def wasabi_detect_coordinators_evaluation_parallel(target_path, worker_name, wor
 
     return combined_results_all
 
+
+def analyze_impact_session_tx_removed_predictions(op, target_path):
+    """
+    Method for analysis of impact of dropping first X conjoins from real client-side experiments from distribution
+    of number of registered inputs and its impact on similarity with output-based predictions
+    :param op:
+    :param target_path:
+    :return:
+    """
+    mix_ids = [f'wasabi2_{coord}' for coord in
+               cjc.WASABI2_COORD_NAMES_ALL] if op.MIX_IDS == "" else op.MIX_IDS
+    logging.info(f'Going to process following mixes: {mix_ids}')
+    for coord in mix_ids:
+        if coord == 'wasabi2_zksnacks':
+            name_template = 'wallet_estimation_matrix_ww2zksnacks'
+        else:
+            name_template = 'wallet_estimation_matrix_ww2kruw'
+
+        # Wallet predictions with increasing number of dropped initial transactions (inputs) from real experiments
+        predicted_wallets_inputs = {}
+        for drop_num in [0, 1, 2, 3, 5, 7]:
+            predict_matrix = als.load_json_from_file(os.path.join(target_path, f'{name_template}_drop{drop_num}.json'))
+            _, predicted_wallets_inputs_avg, _ = cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, False)
+            predicted_wallets_inputs[drop_num] = predicted_wallets_inputs_avg
+
+        fig_single, ax = plt.subplots(figsize=(10, 4))
+        # Plot base estimation from outputs
+        predict_matrix = als.load_json_from_file(os.path.join(target_path, f'{name_template}.json'))
+        cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, True, ax)
+        for drop_num in predicted_wallets_inputs.keys():
+            ax.plot(predicted_wallets_inputs[drop_num],
+                    label=f'first {drop_num} cjtxs dropped',
+                    alpha=1, linewidth=0.5)
+        save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops')
+        ax.legend(loc='upper left')
+        plt.savefig(f'{save_path}.png', dpi=300)
+        plt.savefig(f'{save_path}.pdf', dpi=300)

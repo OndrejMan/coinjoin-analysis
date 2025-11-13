@@ -20,7 +20,7 @@ from cj_process.cj_consts import *
 from cj_process.cj_structs import *
 
 from cj_process import cj_analysis as als
-
+from cj_process import cj_visualize as cjvis
 
 # SLOT_WIDTH_SECONDS = 3600 * 24 * 7  # week
 #SLOT_WIDTH_SECONDS = 3600 * 24  # day
@@ -914,7 +914,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
 
 
 def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict=None,
-                                      plot_inputs_prediction: bool=True, plot_outputs_prediction: bool=True):
+                                      plot_inputs_prediction: bool=True, plot_outputs_prediction: bool=True, ax_provided=None):
     # REFACTOR - mixed analysis and plotting
     AVG_NUM_INPUTS, AVG_NUM_OUTPUTS = als.get_wallets_prediction_ratios(mix_id, prediction_matrix)
 
@@ -1014,7 +1014,10 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
     predicted_wallets_outputs_cilo_avg = als.smooth_interval(predicted_wallets_list_outputs_cilo, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cilo else None
     predicted_wallets_outputs_cihi_avg = als.smooth_interval(predicted_wallets_list_outputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cihi else None
 
-    fig_single, ax = plt.subplots(figsize=(10, 4))  # Figure for single plot
+    if ax_provided == None:
+        fig_single, ax = plt.subplots(figsize=(10, 3))  # Figure for single plot
+    else:
+        ax = ax_provided
     # Plot explict time ticks instead of default ones
     plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
     ax.set_xlabel('coinjoin in time')
@@ -1098,8 +1101,8 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
     plt.savefig(f'{save_path}.png', dpi=300)
     plt.savefig(f'{save_path}.pdf', dpi=300)
     logging.info(f'estimate_wallet_prediction_factor() saved into {save_path}.png')
-    #plt.show()
-    plt.close()
+    if ax_provided == None:
+        plt.close()
 
     predicted_wallets = {}
     last_usable_factor = used_prediction_ratios[len(used_prediction_ratios) - 1]
@@ -1118,7 +1121,7 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
                                   }
     als.save_json_to_file_pretty(f'{save_path}.json', {'mix_id':mix_id, 'predictions': predicted_wallets})
 
-    return ratios_list
+    return predicted_wallets, predicted_wallets_inputs_avg, predicted_wallets_outputs_avg
 
 
 def plot_flows_steamgraph(flow_in_year: dict, title: str):
@@ -2006,7 +2009,8 @@ def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int,
     return series, x_vals
 
 
-def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: str, label_str: str, omitt_coords: list, log_scale: bool, join_coord_results: bool=False):
+def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: str, label_str: str, omitt_coords: list,
+                                            log_scale: bool, join_coord_results: bool=False):
     file_path = os.path.join(target_path, f'{filename}.json')
     results = als.load_json_from_file(file_path)
     fp_string = 'fp'
@@ -2234,7 +2238,7 @@ def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list
     plt.title("Daily coinjoin transactions attributed by different ground-truth datasets (post-zkSNACKs)")
     #plt.xlabel("Date")
     plt.ylabel("Coinjoins per day")
-    plt.legend(loc="upper right", fontsize=LEGEND_FONT_SIZE)
+    plt.legend(loc="upper right", fontsize=14)
     plt.grid(True, linewidth=0.5, alpha=0.4)
     plt.tight_layout()
     plt.savefig(os.path.join(target_path, 'crawl_datasets.png'), dpi=200, bbox_inches="tight")
