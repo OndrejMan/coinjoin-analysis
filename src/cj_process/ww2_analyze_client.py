@@ -1087,9 +1087,9 @@ def visualize_estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str,
     plt.figure(figsize=(10, 6))
 
     def plot_wallets_stats(values_range, N_hat_list, ci_hi_list, ci_lo_list, line_color: str, prefix: str):
-        plt.plot(values_range, N_hat_list, label=f"Num. wallets point estimate ({prefix})", color=line_color, alpha=0.7, linewidth=3)
-        plt.plot(values_range, ci_hi_list, label=f"Upper bound ({prefix}) (CI=95%)", linestyle='-.', color=line_color, alpha=0.7)
-        plt.plot(values_range, ci_lo_list, label=f"Lower bound ({prefix}) (CI=95%)", linestyle='--', color=line_color, alpha=0.7)
+        plt.plot(values_range, N_hat_list, label=f"{prefix}: num. wallets point estimate", color=line_color, alpha=0.7, linewidth=3)
+        plt.plot(values_range, ci_hi_list, label=f"{prefix}: upper bound (CI=95%)", linestyle='-.', color=line_color, alpha=0.7)
+        plt.plot(values_range, ci_lo_list, label=f"{prefix}: lower bound (CI=95%)", linestyle='--', color=line_color, alpha=0.7)
 
     def compute_and_plot(cj_stats: dict, distrib_key: str, line_color: str, prefix: str):
         # Compute across Y = 10..700
@@ -1106,10 +1106,10 @@ def visualize_estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str,
         plot_wallets_stats(values_range, N_hat_list, ci_lo_list, ci_hi_list, line_color, prefix)
         return precomputed
 
-    compute_and_plot(cj_stats1, 'num_inputs', 'red', f'{prefix1}_in')
-    compute_and_plot(cj_stats1, 'num_outputs', 'green', f'{prefix1}_out')
-    compute_and_plot(cj_stats2, 'num_inputs', 'blue', f'{prefix2}_in')
-    compute_and_plot(cj_stats2, 'num_outputs', 'yellow', f'{prefix2}_out')
+    compute_and_plot(cj_stats2, 'num_outputs', 'green', f'{prefix2} [outputs]')
+    compute_and_plot(cj_stats1, 'num_outputs', 'blue', f'{prefix1} [outputs]')
+    compute_and_plot(cj_stats2, 'num_inputs', 'magenta', f'{prefix2} [inputs]')
+    compute_and_plot(cj_stats1, 'num_inputs', 'red', f'{prefix1} [inputs]')
     # compute_and_plot(cj_stats1, 'num_inputs', color1, f'{prefix1}_in')
     # compute_and_plot(cj_stats1, 'num_outputs', 'coral', f'{prefix1}_out')
     # compute_and_plot(cj_stats2, 'num_inputs', color2, f'{prefix2}_in')
@@ -1119,6 +1119,7 @@ def visualize_estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str,
     plt.ylabel("Estimated number of wallets")
     plt.title("Wallet count estimate and 95% Wald CI vs # coinjoin inputs/outputs")
     plt.legend()
+    plt.grid(True, alpha=0.3, linestyle="--")
     plt.tight_layout()
     save_file = os.path.join(base_path, f'{prefix1}_{prefix2}_wallet_predict_confidence')
     plt.savefig(f'{save_file}.png', dpi=300)
