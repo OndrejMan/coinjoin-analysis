@@ -1462,6 +1462,48 @@ def wasabi2_analyse_remixes(mix_id: str, target_path: str):
     cjvis.burntime_histogram(mix_id, data)
 
 
+def compute_flags_property_string(coinjoins:dict):
+
+    def serialize_flags(record: dict) -> str:
+        input_scripts = ''
+        output_scripts = ''
+        for stype in record['scripts_inputs'].keys():
+            input_scripts += f"{stype}={'1' if record['scripts_inputs'][stype] else '0'}|"
+        for stype in record['scripts_outputs'].keys():
+            output_scripts += f"{stype}={'1' if record['scripts_outputs'][stype] else '0'}|"
+        result = f"RBF={'1' if record['is_rbf'] else '0'};INPUTS={input_scripts};OUTPUTS={output_scripts}"
+        return result
+
+    # Get all script types
+    script_types = set()
+    for cjtx in coinjoins.keys():
+        script_types.update([script_type for script_type in coinjoins[cjtx]['script_frequencies']['inputs'].keys()])
+        script_types.update([script_type for script_type in coinjoins[cjtx]['script_frequencies']['outputs'].keys()])
+
+    # Existence of specific script types
+    cjtx_flags = {}
+    cjtx_flags_str = {}
+    for cjtx in coinjoins.keys():
+        cjtx_flags[cjtx] = {}
+        # RBF
+        cjtx_flags[cjtx]['is_rbf'] = True if coinjoins[cjtx].get('isRbf', 'unknown') == 'yes' else False
+        # Script types
+        script_types_flag_inputs = {}
+        script_types_flag_outputs = {}
+        for script_type in script_types:
+            script_types_flag_inputs[script_type] = True
+            num_occurences = coinjoins[cjtx]['script_frequencies']['inputs'].get(script_type, -1)
+            script_types_flag_inputs[script_type] = True if num_occurences > 0 else False
+            num_occurences = coinjoins[cjtx]['script_frequencies']['outputs'].get(script_type, -1)
+            script_types_flag_outputs[script_type] = True if num_occurences > 0 else False
+        cjtx_flags[cjtx]['scripts_inputs'] = script_types_flag_inputs
+        cjtx_flags[cjtx]['scripts_outputs'] = script_types_flag_outputs
+
+        coinjoins[cjtx]['flags_str'] = serialize_flags(cjtx_flags[cjtx])
+
+    return coinjoins
+
+
 def wasabi_detect_false(target_path: str | Path, tx_file: str):
     PROCESS_SUBFOLDERS = False
     if PROCESS_SUBFOLDERS:
@@ -1489,11 +1531,11 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
     # Detected false positives candidates. 3m_xxx contains subset of txs from last 3 months.
     no_remix_all = {'recent__inputs_noremix': {}, 'recent__outputs_noremix': {}, 'recent__both_noremix': {},
                     'recent__inputs_address_reuse': {}, 'recent__outputs_address_reuse': {},
-                    'recent__both_reuse': {}, 'recent__stdenom_rbf_notap_onechange': {},
+                    'recent__both_reuse': {}, 'recent__stdenom_rbf_notap_onechange': {}, 'recent__local_outliers': {},
                     'inputs_noremix': {}, 'outputs_noremix': {}, 'both_noremix': {},
                     'inputs_address_reuse': {}, 'outputs_address_reuse': {},
                     'both_reuse': {}, 'specific_denoms_noremix_in': {}, 'specific_denoms_noremix_out':{},
-                    'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {}, 'stdenom_rbf_notap_onechange': {}}
+                    'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {}, 'stdenom_rbf_notap_onechange': {}, 'local_outliers': {}}
     for dir_name in files:
         target_base_path = os.path.join(target_path, dir_name)
         tx_json_file = os.path.join(target_base_path, f'{tx_file}')
@@ -1508,6 +1550,8 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
             false_cjtxs_file = os.path.join(target_base_path, f'false_filtered_cjtxs_manual.json')
             als.save_json_to_file_pretty(false_cjtxs_file, filtered_false_coinjoins)
 
+            # Precompute flags property string
+            compute_flags_property_string(data["coinjoins"])
 
             # Detect transactions with no remixes on input/out or both
             no_remix = als.detect_no_inout_remix_txs(data["coinjoins"])
@@ -1529,6 +1573,17 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
                 for key in stdenom_rbf_notap_onechange.keys():
                     no_remix_all[key].update(stdenom_rbf_notap_onechange[key])
                     print(f'STDDENOM_RBF_NOTAP_ONECHANGE {key}={len(stdenom_rbf_notap_onechange[key])}')
+
+            # Detect type ouliers
+            DETECT_STRUCTURE_OUTLIERS = True
+            if DETECT_STRUCTURE_OUTLIERS:
+                # Detect transactions that are different than majority of other txs
+                OUTLIER_WINDOW = 1000
+                OUTLIER_THRESHOLD = 0.01
+                local_outliers = als.detect_local_outliers_txs(data["coinjoins"], OUTLIER_WINDOW, OUTLIER_THRESHOLD)
+                for key in local_outliers.keys():
+                    no_remix_all[key].update(local_outliers[key])
+                    print(f'LOCAL_OUTLIERS {key}={len(local_outliers[key])}')
 
             # Detect transactions with specific WW2-like input/output denominations and structure
             DETECT_STRANGE_DENOMS = False
@@ -1557,7 +1612,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
 
     # Pre-filter transactions from past 3 months only for easier human readability
     recent_items_keys = ['inputs_noremix', 'outputs_noremix', 'both_noremix', 'inputs_address_reuse',
-                         'outputs_address_reuse', 'both_reuse', 'stdenom_rbf_notap_onechange']
+                         'outputs_address_reuse', 'both_reuse', 'stdenom_rbf_notap_onechange', 'local_outliers']
     now = datetime.now()
     for item in recent_items_keys:
         no_remix_all[f'recent__{item}'] = {key: no_remix_all[item][key] for key in no_remix_all[item].keys()
@@ -1578,6 +1633,8 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
 
     # save detected no transactions with no remixes (potentially false positives)
     als.save_json_to_file_pretty(os.path.join(target_path, 'no_remix_txs.json'), no_remix_all)
+
+    return data
 
 
 def wasabi1_analyse_remixes(mix_id: str, target_path: str):
@@ -3249,21 +3306,28 @@ def main(argv=None):
     if op.DETECT_FALSE_POSITIVES:
         if op.CJ_TYPE == CoinjoinType.WW1:
             wasabi_detect_false(os.path.join(target_path, 'wasabi1'), 'coinjoin_tx_info.json')
+
         if op.CJ_TYPE == CoinjoinType.WW2:
-            # Run false detection
-            wasabi_detect_false(os.path.join(target_path, 'wasabi2'), 'coinjoin_tx_info.json')
-            # If available, add extended information about coordinator etc.
-            no_remix_all_ext = als.load_json_from_file(os.path.join(target_path, 'wasabi2', 'no_remix_txs.json'))
-            tx_2_coord_map_path = os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json')
-            if os.path.exists(tx_2_coord_map_path):
-                tx_2_coord_map = als.load_json_from_file(tx_2_coord_map_path)
-                for key in list(no_remix_all_ext.keys()):
-                    for txid in list(no_remix_all_ext[key].keys()):
-                        no_remix_all_ext[key][txid] = f"{no_remix_all_ext[key][txid]}__{tx_2_coord_map.get(txid, 'unknown')}"
-            als.save_json_to_file_pretty(os.path.join(target_path, 'wasabi2', 'no_remix_txs_ext.json'), no_remix_all_ext)
+            mix_ids = [f'wasabi2_{coord}' for coord in
+                       cjc.WASABI2_COORD_NAMES_ALL] if op.MIX_IDS == "" else op.MIX_IDS
+            logging.info(f'Going to process following mixes: {mix_ids}')
+            for mix_id in mix_ids:
+                target_base_path = os.path.join(target_path, mix_id)
+                # Run false detection
+                data = wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
+                # If available, add extended information about coordinator etc.
+                no_remix_all_ext = als.load_json_from_file(os.path.join(target_base_path, 'no_remix_txs.json'))
+                tx_2_coord_map_path = os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json')
+                if os.path.exists(tx_2_coord_map_path):
+                    tx_2_coord_map = als.load_json_from_file(tx_2_coord_map_path)
+                    for key in list(no_remix_all_ext.keys()):
+                        for txid in list(no_remix_all_ext[key].keys()):
+                            no_remix_all_ext[key][txid] = f"{no_remix_all_ext[key][txid]}__{data['coinjoins'][txid]['flags_str']}__{tx_2_coord_map.get(txid, 'unknown')}"
+                als.save_json_to_file_pretty(os.path.join(target_base_path, 'no_remix_txs_ext.json'), no_remix_all_ext)
 
         if op.CJ_TYPE == CoinjoinType.JM:
             wasabi_detect_false(os.path.join(target_path, 'joinmarket_all'), 'coinjoin_tx_info.json')
+
         if op.CJ_TYPE == CoinjoinType.SW:
             mix_ids_default = WHIRLPOOL_POOL_NAMES_ALL
             # Force MIX_IDS subset if required

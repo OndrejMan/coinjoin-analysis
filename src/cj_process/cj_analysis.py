@@ -91,7 +91,6 @@ def detect_stdenom_rbf_notap_onechange_txs(coinjoins):
                     #and len(script_freq['outputs']) == 1 and script_freq['outputs'].get('TxWitnessV1Taproot', 0) == 0):
                     isZeroTaproot = True
             if isZeroTaproot:
-
                 # Has exactly one change output?
                 output_denoms = [coinjoins[cjtx]['outputs'][index]['value'] for index in coinjoins[cjtx]['outputs'].keys()]
                 counts = Counter(output_denoms).values()
@@ -99,6 +98,26 @@ def detect_stdenom_rbf_notap_onechange_txs(coinjoins):
 
                 if isExactlyOneChange:
                     hits['stdenom_rbf_notap_onechange'][cjtx] = coinjoins[cjtx]['broadcast_time']
+
+    return hits
+
+
+def detect_local_outliers_txs(coinjoins, window_size: int, outlier_threshold: float):
+    hits = {'local_outliers': {}}
+
+    sorted_cjtxs = sort_coinjoins(coinjoins, SORT_COINJOINS_BY_RELATIVE_ORDER)
+    effective_window_size = min(window_size, len(sorted_cjtxs))
+    for index in range(0, len(sorted_cjtxs) - effective_window_size + 1):
+        # BUGBUG: inefficient implementation, use more clever sliding window instead
+        local_flag_string = [coinjoins[item['txid']]['flags_str'] for item in sorted_cjtxs[index:index + effective_window_size]]
+        flags_counts = Counter(local_flag_string)
+        for value, count in flags_counts.items():
+            if count == 1 or count / effective_window_size < outlier_threshold:
+                outlier_flags = value
+                for record in sorted_cjtxs[index:index+window_size]:
+                    if coinjoins[record['txid']]['flags_str'] == outlier_flags:
+                        # hits['local_outliers'][record['txid']] = f"{coinjoins[record['txid']]['broadcast_time']}__{coinjoins[record['txid']]['flags_str']}"
+                        hits['local_outliers'][record['txid']] = f"{coinjoins[record['txid']]['broadcast_time']}"
 
     return hits
 
