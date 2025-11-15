@@ -913,13 +913,12 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
 
 
 
-def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict=None,
-                                      plot_inputs_prediction: bool=True, plot_outputs_prediction: bool=True, ax_provided=None):
+def estimate_wallet_prediction_factor(all_data: dict, base_path, mix_id, prediction_matrix: dict=None,
+                                      plot_inputs_prediction: bool=True, plot_outputs_prediction: bool=True, ax_provided=None, do_plot=True):
     # REFACTOR - mixed analysis and plotting
     AVG_NUM_INPUTS, AVG_NUM_OUTPUTS = als.get_wallets_prediction_ratios(mix_id, prediction_matrix)
 
     target_load_path = os.path.join(base_path, mix_id)
-    all_data = als.load_coinjoins_from_file(target_load_path, None, True)
     sorted_cj_time = als.sort_coinjoins(all_data['coinjoins'], als.SORT_COINJOINS_BY_RELATIVE_ORDER)
 
     if len(sorted_cj_time) < 2:
@@ -1024,7 +1023,7 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
 
     PLOT_NUM_WALLETS = True
     FULL_LEGEND = False
-    if PLOT_NUM_WALLETS:
+    if PLOT_NUM_WALLETS and do_plot:
         if plot_inputs_prediction:
             ax.plot(predicted_wallets_list_inputs,
                      label='Predicted # wallets (inputs)' if FULL_LEGEND else '_nolegend_',
@@ -1082,7 +1081,7 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
 
 
     PLOT_INPUTS2OUTPUTS_FACTOR = False
-    if PLOT_INPUTS2OUTPUTS_FACTOR:
+    if PLOT_INPUTS2OUTPUTS_FACTOR and do_plot:
         ax2 = ax.twinx()
 
         ax2.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
@@ -1093,15 +1092,19 @@ def estimate_wallet_prediction_factor(base_path, mix_id, prediction_matrix: dict
         ax2.yaxis.set_label_position("left")
         ax2.yaxis.tick_left()
 
-    # Finalize graph
-    plt.subplots_adjust(bottom=0.15)
-    ax.set_title(f'Number of predicted participating wallets: {mix_id}')
-    ax.legend(loc='upper left')
     save_path = os.path.join(target_load_path, f'{mix_id}_wallets_predictions_dynamics')
-    plt.savefig(f'{save_path}.png', dpi=300)
-    plt.savefig(f'{save_path}.pdf', dpi=300)
-    logging.info(f'estimate_wallet_prediction_factor() saved into {save_path}.png')
-    if ax_provided == None:
+    # Finalize graph
+    if do_plot:
+        plt.subplots_adjust(bottom=0.15)
+        ax.set_title(f'Number of predicted participating wallets: {mix_id}')
+        ax.legend(loc='upper left')
+        plt.savefig(f'{save_path}.png', dpi=300)
+        plt.savefig(f'{save_path}.pdf', dpi=300)
+        logging.info(f'estimate_wallet_prediction_factor() saved into {save_path}.png')
+    else:
+        logging.info(f'No plotting requested')
+
+    if ax_provided is None:
         plt.close()
 
     predicted_wallets = {}

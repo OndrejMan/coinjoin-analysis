@@ -3479,16 +3479,21 @@ def main(argv=None):
                 else:
                     predict_matrix = als.load_json_from_file(os.path.join(target_path, 'wallet_estimation_matrix_ww2kruw.json'))
 
+                all_data = als.load_coinjoins_from_file(os.path.join(target_path, coord), None, True)
+
                 # Wallet predictions based on outputs
-                cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, True)
+                cjvis.estimate_wallet_prediction_factor(all_data, target_path, coord, predict_matrix['0.05'], False, True)
 
         if op.CJ_TYPE == CoinjoinType.WW1:
-            cjvis.estimate_wallet_prediction_factor(target_path, 'wasabi1_zksnacks')
+            all_data = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi1_zksnacks'), None, True)
+            cjvis.estimate_wallet_prediction_factor(all_data, target_path, 'wasabi1_zksnacks')
 
 
     if op.ANALYSIS_WALLET_PREDICTION_EXT:
         if op.CJ_TYPE == CoinjoinType.WW2:
-            cja.analyze_impact_session_tx_removed_predictions(op, target_path)
+            #cja.analyze_impact_session_tx_removed_predictions(op, target_path)
+            cja.analyze_impact_session_tx_removed_predictions2(op, target_path)
+
 
 
 
