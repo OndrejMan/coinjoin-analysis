@@ -12,6 +12,7 @@ from enum import Enum
 from typing import List
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import numpy as np
 
 from matplotlib import pyplot as plt
 
@@ -462,22 +463,119 @@ def analyze_impact_session_tx_removed_predictions(op, target_path):
         else:
             name_template = 'wallet_estimation_matrix_ww2kruw'
 
+        all_data = als.load_coinjoins_from_file(os.path.join(target_path, coord), None, True)
+
         # Wallet predictions with increasing number of dropped initial transactions (inputs) from real experiments
         predicted_wallets_inputs = {}
         for drop_num in [0, 1, 2, 3, 5, 7]:
             predict_matrix = als.load_json_from_file(os.path.join(target_path, f'{name_template}_drop{drop_num}.json'))
-            _, predicted_wallets_inputs_avg, _ = cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, False)
+            _, predicted_wallets_inputs_avg, _ = cjvis.estimate_wallet_prediction_factor(all_data, target_path, coord, predict_matrix['0.05'], False, False)
             predicted_wallets_inputs[drop_num] = predicted_wallets_inputs_avg
 
         fig_single, ax = plt.subplots(figsize=(10, 4))
         # Plot base estimation from outputs
         predict_matrix = als.load_json_from_file(os.path.join(target_path, f'{name_template}.json'))
-        cjvis.estimate_wallet_prediction_factor(target_path, coord, predict_matrix['0.05'], False, True, ax)
+        cjvis.estimate_wallet_prediction_factor(all_data, target_path, coord, predict_matrix['0.05'], False, True, ax)
         for drop_num in predicted_wallets_inputs.keys():
             ax.plot(predicted_wallets_inputs[drop_num],
                     label=f'first {drop_num} cjtxs dropped',
-                    alpha=1, linewidth=0.5)
+                    alpha=0.5, linewidth=0.5)
         save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops')
         ax.legend(loc='upper left')
         plt.savefig(f'{save_path}.png', dpi=300)
         plt.savefig(f'{save_path}.pdf', dpi=300)
+
+
+def analyze_impact_session_tx_removed_predictions2(op, target_path):
+    """
+    Method for analysis of impact of dropping first X conjoins from real client-side experiments from distribution
+    of number of registered inputs and its impact on similarity with output-based predictions
+    :param op:
+    :param target_path:
+    :return:
+    """
+    mix_ids = [f'wasabi2_{coord}' for coord in
+               cjc.WASABI2_COORD_NAMES_ALL] if op.MIX_IDS == "" else op.MIX_IDS
+    logging.info(f'Going to process following mixes: {mix_ids}')
+    for coord in mix_ids:
+        if coord == 'wasabi2_zksnacks':
+            name_template = 'wallet_estimation_matrix_ww2zksnacks'
+        else:
+            name_template = 'wallet_estimation_matrix_ww2kruw'
+
+        all_data = als.load_coinjoins_from_file(os.path.join(target_path, coord), None, True)
+
+        # Wallet predictions with increasing number of dropped initial transactions (inputs) from real experiments
+        predicted_wallets_inputs = {}
+        predicted_wallets_outputs_avg = []
+        for drop_num in [0, 1, 2, 3, 5, 7]:
+            predict_matrix = als.load_json_from_file(os.path.join(target_path, f'{name_template}_drop{drop_num}.json'))
+            _, predicted_wallets_inputs_avg, predicted_wallets_outputs_avg = cjvis.estimate_wallet_prediction_factor(all_data, target_path, coord,
+                                    predict_matrix['0.05'], False, False, None, False)
+            predicted_wallets_inputs[drop_num] = predicted_wallets_inputs_avg
+
+        # Compute difference between inputs-based prediction and outputs-based prediction
+        predicted_wallets_diff = {}
+        for drop_num in predicted_wallets_inputs.keys():
+            predicted_wallets_diff[drop_num] = [x - y for x, y in zip(predicted_wallets_inputs[drop_num], predicted_wallets_outputs_avg)]
+        #
+        # fig_single, ax = plt.subplots(figsize=(10, 4))
+        # for drop_num in predicted_wallets_diff.keys():
+        #     ax.plot(predicted_wallets_diff[drop_num],
+        #             label=f'first {drop_num} cjtxs dropped',
+        #             alpha=0.5, linewidth=0.5)
+        # save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops')
+        # ax.legend(loc='upper left')
+        # plt.savefig(f'{save_path}.png', dpi=300)
+        # plt.savefig(f'{save_path}.pdf', dpi=300)
+
+
+        # Compute means for each BLOCK_LENGTH coinjoins
+        BLOCK_LENGTH = 1000
+        all_means = []
+        drop_num_array = []
+        for drop_num in predicted_wallets_diff.keys():
+            arr = np.array(predicted_wallets_diff[drop_num])
+            means = [arr[i:i + BLOCK_LENGTH].mean() for i in range(0, len(arr), BLOCK_LENGTH)]
+            all_means.append(means)
+            drop_num_array.append(drop_num)
+        # Plot
+        n_sets = len(all_means)
+        max_len = max(len(m) for m in all_means)
+        x = np.arange(max_len)  # block indices
+        width = 0.8 / n_sets  # bar width so groups don’t overlap
+        fig_single, ax = plt.subplots(figsize=(10, 4))
+        for idx, means in enumerate(all_means):
+            offset = (idx - n_sets / 2) * width + width / 2
+            plt.bar(x + offset, means, width=width, label=f"First {drop_num_array[idx]} transactions omitted")
+        save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops_bars')
+        ax.legend(loc='lower left')
+        plt.savefig(f'{save_path}.png', dpi=300)
+        plt.savefig(f'{save_path}.pdf', dpi=300)
+
+
+        # # Compute means for each BLOCK_LENGTH coinjoins
+        # BLOCK_LENGTH = 1000
+        # all_means = []
+        # means_drop_info = []
+        # for drop_num in predicted_wallets_diff.keys():
+        #     arr = np.array(predicted_wallets_diff[drop_num])
+        #     means = [arr[i:i + BLOCK_LENGTH].mean() for i in range(0, len(arr), BLOCK_LENGTH)]
+        #     all_means.append(means)
+        #     means_drop_info.append(drop_num)
+        # # Plot
+        # n_sets = len(all_means)
+        # max_len = max(len(m) for m in all_means)
+        # x = np.arange(max_len) * BLOCK_LENGTH
+        # width = 0.8 / n_sets
+        # fig_single, ax = plt.subplots(figsize=(10, 4))
+        # for idx, means in enumerate(all_means):
+        #     means_drop = means_drop_info[idx]
+        #     means_data = means
+        #     offset = (idx - n_sets / 2) * width + width / 2
+        #     plt.bar(x + offset, means_data, width=width, label=f"First {means_drop} transactions omitted")
+        # save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops_bars')
+        # #plt.xticks([])
+        # ax.legend(loc='upper left')
+        # plt.savefig(f'{save_path}.png', dpi=300)
+        # plt.savefig(f'{save_path}.pdf', dpi=300)
