@@ -1,3 +1,4 @@
+import csv
 import logging
 import copy
 import math
@@ -1463,15 +1464,52 @@ def wasabi2_analyse_remixes(mix_id: str, target_path: str):
 
 
 def compute_flags_property_string(coinjoins:dict):
+    def serialize_flags(record: dict, cjtx: dict) -> str:
+        def shorten_script_type(script_type: str) -> str:
+            result = script_type
+            if script_type == 'TxScripthash':
+                return 'P2SH'
+            if script_type == 'TxPubkeyhash':
+                return 'P2PKH'
+            if script_type == 'TxWitnessV1Taproot':
+                return 'P2TRv1'
+            if script_type == 'TxWitnessV0Keyhash':
+                return 'P2WPKHv0'
+            if script_type == 'TxWitnessV0Scripthash':
+                return 'P2WSHv0'
+            return result
 
-    def serialize_flags(record: dict) -> str:
         input_scripts = ''
         output_scripts = ''
         for stype in record['scripts_inputs'].keys():
-            input_scripts += f"{stype}={'1' if record['scripts_inputs'][stype] else '0'}|"
+            input_scripts += f"{shorten_script_type(stype)}={'1' if record['scripts_inputs'][stype] else '0'}|"
         for stype in record['scripts_outputs'].keys():
-            output_scripts += f"{stype}={'1' if record['scripts_outputs'][stype] else '0'}|"
-        result = f"RBF={'1' if record['is_rbf'] else '0'};INPUTS={input_scripts};OUTPUTS={output_scripts}"
+            output_scripts += f"{shorten_script_type(stype)}={'1' if record['scripts_outputs'][stype] else '0'}|"
+
+        def get_sort_order_string(array: list) -> str:
+            output_ordering = "NONE"
+            array_asc = sorted(array)
+            array_desc = sorted(array, reverse=True)
+            if array == array_desc:
+                output_ordering = "DESC" # Descendingly
+            elif array == array_asc:
+                output_ordering = "ASC " # Ascendingly
+            ctr = Counter(array)
+            most_common_value, most_common_count = ctr.most_common(1)[0]
+            if most_common_count > 1 and all(v == most_common_value for v in array[:most_common_count]):
+                output_ordering = "SDFI"  # Same Denomination FIrst
+
+            return output_ordering
+
+        #input_ordering = get_sort_order_string([cjtx['inputs'][index]['value'] for index in cjtx['inputs'].keys()])
+        outputs = [cjtx['outputs'][index]['value'] for index in cjtx['outputs'].keys()]
+        output_ordering = get_sort_order_string(outputs)
+
+        # TODO: Add Check if outputs are sorted from smallest to biggest (later WW1)
+        # TODO: add check that biggest group of same-output is the first one (earlier WW1)
+        # TODO: Add Check if outputs contains same-output groups that are 2x value of another same-output group (WW1 - but not always)
+
+        result = f"RBF={'1' if record['is_rbf'] else '0'}|ORD={output_ordering}|INS:{input_scripts}|OUTS:{output_scripts}"
         return result
 
     # Get all script types
@@ -1499,7 +1537,7 @@ def compute_flags_property_string(coinjoins:dict):
         cjtx_flags[cjtx]['scripts_inputs'] = script_types_flag_inputs
         cjtx_flags[cjtx]['scripts_outputs'] = script_types_flag_outputs
 
-        coinjoins[cjtx]['flags_str'] = serialize_flags(cjtx_flags[cjtx])
+        coinjoins[cjtx]['flags_str'] = serialize_flags(cjtx_flags[cjtx], coinjoins[cjtx])
 
     return coinjoins
 
@@ -1558,12 +1596,14 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
             for key in no_remix.keys():
                 no_remix_all[key].update(no_remix[key])
                 print(f'NO_REMIX {key}={len(no_remix_all[key])}')
+                for txid in no_remix_all[key]:
+                    print(f"NO_REMIX {txid}={data['coinjoins'][txid]['flags_str']}")
 
             # Detect transactions with too many address reuse
             address_reuse = als.detect_address_reuse_txs(data["coinjoins"], REUSE_THRESHOLD)
             for key in address_reuse.keys():
                 no_remix_all[key].update(address_reuse[key])
-                print(f'ADDRESS_REUSE {key}={len(address_reuse[key])}')
+                print(f'ADDRESS_REUSE {key}:{len(address_reuse[key])}')
 
             # For all no_remix hits detect the RBF and Taproot usage
             DETECT_STDDENOM_RBF_NOTAP_ONECHANGE = True
@@ -1584,6 +1624,8 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
                 for key in local_outliers.keys():
                     no_remix_all[key].update(local_outliers[key])
                     print(f'LOCAL_OUTLIERS {key}={len(local_outliers[key])}')
+                    for txid in no_remix_all[key]:
+                        print(f"LOCAL_OUTLIERS {txid}:{data['coinjoins'][txid]['flags_str']}")
 
             # Detect transactions with specific WW2-like input/output denominations and structure
             DETECT_STRANGE_DENOMS = False
@@ -2552,6 +2594,7 @@ class DumplingsParseOptions:
     ANALYSIS_WALLET_PREDICTION_EXT = False
     ANALYZE_DETECT_COORDINATORS_ALG = False
     ANALYZE_DETECT_COORDINATORS_ALG_DETAILED = False
+    EXPORT_TX_FLAGS = False
 
     target_base_path = ''
     #interval_stop_date = '2024-10-10 00:00:07.000'  # Last date to be analyzed, e.g., 2024-10-10 00:00:07.000
@@ -2652,6 +2695,7 @@ class DumplingsParseOptions:
         self.ANALYSIS_WALLET_PREDICTION_EXT = False
         self.ANALYZE_DETECT_COORDINATORS_ALG = False
         self.ANALYZE_DETECT_COORDINATORS_ALG_DETAILED = False
+        self.EXPORT_TX_FLAGS = False
 
         self.PLOT_REMIXES_FLOWS = False
         self.PLOT_INTERMIX_FLOWS = False
@@ -3660,6 +3704,41 @@ def main(argv=None):
     # !!! Generate decreased attribution for single coordinator only (all other will stay the same)
     # !!! Generate intermix flows not only for second but all other known coordinators
     # !!! Generate graph showing content of the collected cktxs from different API (wasabist, liquisabi, monitor, unknown)
+    if op.EXPORT_TX_FLAGS:
+        if op.MIX_IDS == "":
+            if op.CJ_TYPE == CoinjoinType.WW2:
+                mix_ids = [f'wasabi2_{coord}' for coord in cjc.WASABI2_COORD_NAMES_ALL]
+                mix_ids.append('wasabi2')
+            if op.CJ_TYPE == CoinjoinType.WW1:
+                mix_ids = [f'wasabi1_{coord}' for coord in cjc.WASABI1_COORD_NAMES_ALL]
+                mix_ids.append('wasabi1')
+            if op.CJ_TYPE == CoinjoinType.SW:
+                mix_ids = cjc.WHIRLPOOL_POOL_NAMES_ALL
+            if op.CJ_TYPE == CoinjoinType.JM:
+                mix_ids = ['joinmarket_all']
+        else:
+            mix_ids = op.MIX_IDS
+
+        logging.info(f'Going to process following mixes: {mix_ids}')
+        for mix_id in mix_ids:
+            # Load all extracted coinjoins, compute their flags string, export to dedicated file
+            data = als.load_coinjoins_from_file(os.path.join(target_path, mix_id), None, True)
+            # Compute flags property string
+            compute_flags_property_string(data['coinjoins'])
+            # Sort coinjoins are required
+            sorted_cjtxs = als.sort_coinjoins(data['coinjoins'], als.SORT_COINJOINS_BY_RELATIVE_ORDER)
+            # Save txid + serialized flags
+            cjtxs_flags = {txid['txid']: data['coinjoins'][txid['txid']]['flags_str'] for txid in sorted_cjtxs}
+            als.save_json_to_file_pretty(os.path.join(target_path, mix_id, 'coinjoin_tx_flags.json'), cjtxs_flags)
+            # Save more info into csv file
+            cjtxs_flags_csv = [['txid', 'flags', 'num_ins', 'num_outs']]
+            for txid in sorted_cjtxs:
+                cjtxs_flags_csv.append([txid['txid'], data['coinjoins'][txid['txid']]['flags_str'],
+                                        len(data['coinjoins'][txid['txid']]['inputs']),
+                                        len(data['coinjoins'][txid['txid']]['outputs'])])
+            with open(os.path.join(target_path, mix_id, 'coinjoin_tx_flags.csv'), "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerows(cjtxs_flags_csv)
 
 
     print('### SUMMARY #############################')

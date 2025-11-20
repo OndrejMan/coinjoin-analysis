@@ -19,7 +19,10 @@ for dir in whirlpool_100k whirlpool_1M whirlpool_5M whirlpool_50M whirlpool_ashi
 done
 
 # Run false positives detection
-python3 -m cj_process.parse_dumplings --cjtype sw --action detect_false_positives --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+python3 -m cj_process.parse_dumplings --cjtype sw --action detect_false_positives --env_vars "MIX_IDS=['whirlpool']" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+
+# Extract TX flags
+python3 -m cj_process.parse_dumplings --cjtype sw --env_vars "EXPORT_TX_FLAGS=True" --target-path $TMP_DIR/
 
 # Analyse liquidity 
 python3 -m cj_process.parse_dumplings --cjtype sw --target-path $TMP_DIR/ --env_vars "ANALYSIS_LIQUIDITY=True" | tee parse_dumplings.py.log
