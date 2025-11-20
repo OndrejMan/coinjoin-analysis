@@ -383,7 +383,7 @@ def print_liquidity_summary(coinjoins: dict, mix_id: str):
     mix_id_latex = mix_id.replace('_', '\\_' )
     lr['latex_summary'] = f'\\hline   ' \
              + f'{mix_id_latex} & {earliest_time}--{latest_time} & ' \
-             + f'{len(coinjoins.keys())} & {total_mix_entering_number} / {round(total_mix_entering_value / SATS_IN_BTC, 1)}~\\bitcoinSymbol' + '{} & ' \
+             + f"{len(coinjoins.keys())} & {total_mix_entering_number} / {round(lr['total_fresh_inputs_without_nonstandard_outputs_value'], 1)}~\\bitcoinSymbol" + "{} & " \
              + f'{get_ratio(total_mix_remix_value, total_inputs_value)}\\% & ' \
              + f'{get_ratio(total_mix_staying_number, total_outputs_number - total_mix_remix_out_number)}\\%, {round(total_mix_staying_value / SATS_IN_BTC, 1)}~\\bitcoinSymbol' + '{} & ' \
              + f'{min(total_inputs_len)} / {round(np.average(total_inputs_len), 1)} / {max(total_inputs_len)} \\\\'
