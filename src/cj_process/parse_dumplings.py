@@ -2200,24 +2200,25 @@ def wasabi1_extract_other_pools(selected_coords: list, data: dict, target_path: 
     #save_coinjoins_create_folder(cjtx_coord_zknacks_filtered, target_path, coord_full_name + '_after_sus_output')
 
     # Additional filtering check - too many fresh inputs are suspicious
-    to_remove = {}
-    SUS_MIX_ENTER_RATIO = 0.7
-    for cjtx in cjtx_coord_zknacks_filtered.keys():
-        num_inputs_enter = sum([1 for index in cjtx_coord_zknacks_filtered[cjtx]['inputs'].keys()
-                          if cjtx_coord_zknacks_filtered[cjtx]['inputs'][index]['mix_event_type'] == MIX_EVENT_TYPE.MIX_ENTER.name])
-        fresh_ratio = (num_inputs_enter / len(cjtx_coord_zknacks_filtered[cjtx]['inputs']))
-        if fresh_ratio > SUS_MIX_ENTER_RATIO:
-            print(f'{cjtx} ({data["coinjoins"][cjtx]["broadcast_time"]}) has suspiciously high fresh inputs of {fresh_ratio}')
-            if cjtx != 'f250e997dc1a2d68861e03689d1709973e1964a62f929ba5727fe8607dafb676':  # Very first WW1 transaction, keep
-                to_remove[cjtx] = True
-    # Remove found candidates for filtering
-    cjtx_coord_zknacks_filtered2 = {cjtx: cjtx_coord_zknacks_filtered[cjtx] for cjtx in cjtx_coord_zknacks_filtered.keys()
-                                   if cjtx not in to_remove.keys()}
-    cjtx_coord_zknacks_filtered = cjtx_coord_zknacks_filtered2
-
-    # Recompute liquidity events based on the current coinjoin set
-    als.recompute_enter_remix_liquidity_after_removed_cjtxs(cjtx_coord_zknacks_filtered, MIX_PROTOCOL.WASABI1)
-    #save_coinjoins_create_folder(cjtx_coord_zknacks_filtered, target_path, coord_full_name + '_after_sus_fresh_rate')
+    REMOVE_TOO_MANY_ENTER = True
+    if REMOVE_TOO_MANY_ENTER:
+        to_remove = {}
+        SUS_MIX_ENTER_RATIO = 0.9
+        for cjtx in cjtx_coord_zknacks_filtered.keys():
+            num_inputs_enter = sum([1 for index in cjtx_coord_zknacks_filtered[cjtx]['inputs'].keys()
+                              if cjtx_coord_zknacks_filtered[cjtx]['inputs'][index]['mix_event_type'] == MIX_EVENT_TYPE.MIX_ENTER.name])
+            fresh_ratio = (num_inputs_enter / len(cjtx_coord_zknacks_filtered[cjtx]['inputs']))
+            if fresh_ratio > SUS_MIX_ENTER_RATIO:
+                print(f'{cjtx} ({data["coinjoins"][cjtx]["broadcast_time"]}) has suspiciously high fresh inputs of {fresh_ratio}')
+                if cjtx != 'f250e997dc1a2d68861e03689d1709973e1964a62f929ba5727fe8607dafb676':  # Very first WW1 transaction, keep
+                    to_remove[cjtx] = True
+        # Remove found candidates for filtering
+        cjtx_coord_zknacks_filtered2 = {cjtx: cjtx_coord_zknacks_filtered[cjtx] for cjtx in cjtx_coord_zknacks_filtered.keys()
+                                       if cjtx not in to_remove.keys()}
+        cjtx_coord_zknacks_filtered = cjtx_coord_zknacks_filtered2
+        # Recompute liquidity events based on the current coinjoin set
+        als.recompute_enter_remix_liquidity_after_removed_cjtxs(cjtx_coord_zknacks_filtered, MIX_PROTOCOL.WASABI1)
+        #save_coinjoins_create_folder(cjtx_coord_zknacks_filtered, target_path, coord_full_name + '_after_sus_fresh_rate')
 
     save_coinjoins_create_folder(cjtx_coord_zknacks_filtered, target_path, coord_full_name)
     logging.info(f'Total cjtxs extracted for pool {coord_full_name}: {len(cjtx_coord_zknacks_filtered)}')
@@ -3349,25 +3350,46 @@ def main(argv=None):
 
     if op.DETECT_FALSE_POSITIVES:
         if op.CJ_TYPE == CoinjoinType.WW1:
-            wasabi_detect_false(os.path.join(target_path, 'wasabi1'), 'coinjoin_tx_info.json')
-
-        if op.CJ_TYPE == CoinjoinType.WW2:
-            mix_ids = [f'wasabi2_{coord}' for coord in
-                       cjc.WASABI2_COORD_NAMES_ALL] if op.MIX_IDS == "" else op.MIX_IDS
+            if op.MIX_IDS == "":  # All coordinators including base wasabi1 folder
+                mix_ids = ['wasabi1_zksnacks', 'wasabi1']
+            else:
+                mix_ids = op.MIX_IDS
             logging.info(f'Going to process following mixes: {mix_ids}')
             for mix_id in mix_ids:
                 target_base_path = os.path.join(target_path, mix_id)
-                # Run false detection
-                data = wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
-                # If available, add extended information about coordinator etc.
-                no_remix_all_ext = als.load_json_from_file(os.path.join(target_base_path, 'no_remix_txs.json'))
-                tx_2_coord_map_path = os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json')
-                if os.path.exists(tx_2_coord_map_path):
-                    tx_2_coord_map = als.load_json_from_file(tx_2_coord_map_path)
-                    for key in list(no_remix_all_ext.keys()):
-                        for txid in list(no_remix_all_ext[key].keys()):
-                            no_remix_all_ext[key][txid] = f"{no_remix_all_ext[key][txid]}__{data['coinjoins'][txid]['flags_str']}__{tx_2_coord_map.get(txid, 'unknown')}"
-                als.save_json_to_file_pretty(os.path.join(target_base_path, 'no_remix_txs_ext.json'), no_remix_all_ext)
+                if os.path.exists(target_base_path):
+                    wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
+                else:
+                    logging.warning(f'DETECT_FALSE_POSITIVES: path {target_base_path} does not exist')
+
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            if op.MIX_IDS == "":  # All coordinators including base wasabi2 folder
+                mix_ids = [f'wasabi2_{coord}' for coord in cjc.WASABI2_COORD_NAMES_ALL]
+                mix_ids.append('wasabi2')
+            else:
+                mix_ids = op.MIX_IDS
+
+            logging.info(f'Going to process following mixes: {mix_ids}')
+            for mix_id in mix_ids:
+                target_base_path = os.path.join(target_path, mix_id)
+                if os.path.exists(target_base_path):
+                    # Run false detection
+                    data = wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
+                    # If available, add extended information about coordinator etc.
+                    no_remix_all_ext = als.load_json_from_file(os.path.join(target_base_path, 'no_remix_txs.json'))
+                    tx_2_coord_map_path = os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json')
+                    if os.path.exists(tx_2_coord_map_path):
+                        tx_2_coord_map = als.load_json_from_file(tx_2_coord_map_path)
+                        for key in list(no_remix_all_ext.keys()):
+                            for txid in list(no_remix_all_ext[key].keys()):
+                                if key.find('local_outliers') != -1:
+                                    no_remix_all_ext[key][txid] = f"{no_remix_all_ext[key][txid]}__{data['coinjoins'][txid]['flags_str']}__{tx_2_coord_map.get(txid, 'unknown')}"
+                                else:
+                                    no_remix_all_ext[key][txid] = f"{no_remix_all_ext[key][txid]}__{tx_2_coord_map.get(txid, 'unknown')}"
+
+                    als.save_json_to_file_pretty(os.path.join(target_base_path, 'no_remix_txs_ext.json'), no_remix_all_ext)
+                else:
+                    logging.warning(f'DETECT_FALSE_POSITIVES: path {target_base_path} does not exist')
 
         if op.CJ_TYPE == CoinjoinType.JM:
             wasabi_detect_false(os.path.join(target_path, 'joinmarket_all'), 'coinjoin_tx_info.json')
@@ -3377,7 +3399,11 @@ def main(argv=None):
             # Force MIX_IDS subset if required
             mix_ids = mix_ids_default if op.MIX_IDS == "" else op.MIX_IDS
             for mix_id in mix_ids:
-                wasabi_detect_false(os.path.join(target_path, mix_id), 'coinjoin_tx_info.json')
+                target_base_path = os.path.join(target_path, mix_id)
+                if os.path.exists(target_base_path):
+                    wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
+                else:
+                    logging.warning(f'DETECT_FALSE_POSITIVES: path {target_base_path} does not exist')
 
     if op.RESTORE_FALSE_POSITIVES_FOR_OTHERS:
         restore_false_positives_for_others(target_path)
