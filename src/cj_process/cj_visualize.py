@@ -538,10 +538,13 @@ def plot_month_year_separators(new_month_indices, separators_to_plot, ax2):
 
 
 def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str, sort_coinjoins_relative_order: bool,
-                        analyze_values: bool = True, normalize_values: bool = True,
-                        restrict_to_out_size = None, restrict_to_in_size = None,
-                        plot_multigraph: bool = True, plot_only_intervals: bool=False, filter_paths: list=None):
+                               analyze_values: bool = True, normalize_values: bool = True,
+                               restrict_to_out_size = None, restrict_to_in_size = None,
+                               plot_multi_graphs: bool=False, plot_single_intervals: bool=False, plot_aggregate: bool=False,
+                               filter_paths: list=None, initial_ranges_values: dict=None):
     logging.info(f"Starting next worker")
+
+    result = {}
 
     als.SORT_COINJOINS_BY_RELATIVE_ORDER = sort_coinjoins_relative_order
 
@@ -563,7 +566,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                       if os.path.isdir(os.path.join(target_path, dir_name)) and
                       os.path.exists(os.path.join(target_path, dir_name, f'{tx_file}'))])
 
-    if not plot_only_intervals:
+    if plot_multi_graphs or plot_aggregate:
         NUM_COLUMNS = 3
         NUM_ADDITIONAL_GRAPHS = 1 + NUM_COLUMNS
         NUM_ROWS = int((num_months + NUM_ADDITIONAL_GRAPHS) / NUM_COLUMNS + 1)
@@ -595,6 +598,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
     for dir_name in sorted(files):
         if dir_name not in filter_paths:  # Process only for selected paths
             continue
+
+        result[dir_name] = {}
         target_base_path = os.path.join(target_path, dir_name)
         tx_json_file = os.path.join(target_base_path, f'{tx_file}')
         current_year = dir_name[0:4]
@@ -613,11 +618,13 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                     continue
 
             fig_single = None
-            if plot_only_intervals:
+            if plot_single_intervals:
                 fig_single, ax_to_use = plt.subplots(figsize=(20, 10))  # Figure for single plot
-            else:
+            elif plot_multi_graphs:
                 ax_to_use = fig.add_subplot(NUM_ROWS, NUM_COLUMNS, ax_index, axes_class=AA.Axes)  # Get next subplot
                 ax_index += 1
+            else:
+                ax_to_use = None
 
             ax = ax_to_use
 
@@ -628,8 +635,9 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 if dates[i].day != dates[i - 1].day:
                     new_day_indices.append(('day', i))
             #print(new_day_indices)
-            for pos in new_day_indices:
-                ax.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.2)
+            if ax:
+                for pos in new_day_indices:
+                    ax.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.2)
 
             # Store index of coinjoins within this month (to be printed later in cummulative graph)
             if current_year == prev_year:
@@ -648,7 +656,9 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 no_remix_all[key].extend(no_remix[key])
 
             # Plot bars corresponding to different input types
-            plot_ax = ax if plot_multigraph else None
+            #plot_ax = ax if plot_multi_graphs else None
+            plot_ax = ax
+
             input_types_interval = plot_inputs_type_ratio(f'{mix_id} {dir_name}', data, initial_cj_index, plot_ax, analyze_values, normalize_values, restrict_to_in_size)
             for input_type in input_types_interval:
                 if input_type not in input_types.keys():
@@ -656,19 +666,47 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 input_types[input_type].extend(input_types_interval[input_type])
 
             # Add current total mix liquidity into the same graph
-            ax2 = ax.twinx()
-            plot_ax = ax2 if plot_multigraph else None
+            ax2 = ax.twinx() if ax else None
+            #plot_ax = ax2 if plot_multi_graphs else None
+            plot_ax = ax2
+
+            # Set initial value for given intervale based on previous intervals (if provided)
+            start_changing_liquidity = changing_liquidity[-1]
+            start_stay_liquidity = stay_liquidity[-1]
+            start_remix_liquidity = remix_liquidity[-1]
+            start_changing_liquidity_timecutoff = changing_liquidity_timecutoff[-1]
+            start_stay_liquidity_timecutoff = stay_liquidity_timecutoff[-1]
+            if initial_ranges_values:  # If provided, use this as start values for liquidity instead
+                start_changing_liquidity = initial_ranges_values[dir_name]['start_changing_liquidity']
+                start_stay_liquidity = initial_ranges_values[dir_name]['start_stay_liquidity']
+                start_remix_liquidity = initial_ranges_values[dir_name]['start_remix_liquidity']
+                start_changing_liquidity_timecutoff = initial_ranges_values[dir_name]['start_changing_liquidity_timecutoff']
+                start_stay_liquidity_timecutoff = initial_ranges_values[dir_name]['start_stay_liquidity_timecutoff']
+            # Save initial value for the given interval
+            result[dir_name]['start_changing_liquidity'] = start_changing_liquidity
+            result[dir_name]['start_stay_liquidity'] = start_stay_liquidity
+            result[dir_name]['start_remix_liquidity'] = start_remix_liquidity
+            result[dir_name]['start_changing_liquidity_timecutoff'] = start_changing_liquidity_timecutoff
+            result[dir_name]['start_stay_liquidity_timecutoff'] = start_stay_liquidity_timecutoff
+
             changing_liquidity_interval, stay_liquidity_interval, remix_liquidity_interval, changing_liquidity_timecutoff_interval, stay_liquidity_timecutoff_interval = (
-                plot_mix_liquidity(f'{mix_id} {dir_name}', data, (changing_liquidity[-1], stay_liquidity[-1], remix_liquidity[-1], changing_liquidity_timecutoff[-1], stay_liquidity_timecutoff[-1]), time_liquidity, initial_cj_index, plot_ax))
+                plot_mix_liquidity(f'{mix_id} {dir_name}', data, (start_changing_liquidity, start_stay_liquidity, start_remix_liquidity, start_changing_liquidity_timecutoff, start_stay_liquidity_timecutoff), time_liquidity, initial_cj_index, plot_ax))
+            # Extend whole array over all intervals
             changing_liquidity.extend(changing_liquidity_interval)
             stay_liquidity.extend(stay_liquidity_interval)
             remix_liquidity.extend(remix_liquidity_interval)
             changing_liquidity_timecutoff.extend(changing_liquidity_timecutoff_interval)
             stay_liquidity_timecutoff.extend(stay_liquidity_timecutoff_interval)
+            # Save whole interval results for
+            result[dir_name]['interval_changing_liquidity'] = changing_liquidity_interval
+            result[dir_name]['interval_stay_liquidity'] = stay_liquidity_interval
+            result[dir_name]['interval_remix_liquidity'] = remix_liquidity_interval
+            result[dir_name]['interval_changing_liquidity_timecutoff'] = changing_liquidity_timecutoff_interval
+            result[dir_name]['interval_stay_liquidity_timecutoff'] = stay_liquidity_timecutoff_interval
 
             # Add fee rate into the same graph
             PLOT_FEERATE = False
-            if PLOT_FEERATE:
+            if PLOT_FEERATE and ax:
                 ax3 = ax.twinx()
                 ax3.spines['right'].set_position(('outward', -30))  # Adjust position of the third axis
             else:
@@ -678,8 +716,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             mining_fee_rate_interval = plot_mining_fee_rates(f'{mix_id} {dir_name}', data, mining_fee_rates, ax3)
             mining_fee_rate.extend(mining_fee_rate_interval)
 
-            PLOT_NUM_WALLETS = True if plot_only_intervals else False
-            if PLOT_NUM_WALLETS:
+            PLOT_NUM_WALLETS = True if plot_single_intervals else False
+            if PLOT_NUM_WALLETS and ax:
                 ax3 = ax.twinx()
                 ax3.spines['right'].set_position(('outward', -28))  # Adjust position of the third axis
             else:
@@ -688,7 +726,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             num_wallets.extend(num_wallets_interval)
 
             initial_cj_index = initial_cj_index + len(data["coinjoins"])
-            ax.set_title(f'Type of inputs for given cjtx ({"values" if analyze_values else "number"})\n{mix_id} {dir_name}')
+            if ax:
+                ax.set_title(f'Type of inputs for given cjtx ({"values" if analyze_values else "number"})\n{mix_id} {dir_name}')
             logging.info(f'{target_base_path} inputs analyzed')
 
             # Compute liquidity inflows (sum of weeks)
@@ -707,12 +746,13 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 months_dict[month_key][key] = record
 
             # Extend the y-limits to ensure the vertical lines go beyond the plot edges
-            y_range = ax.get_ylim()
-            padding = 0.02 * (y_range[1] - y_range[0])
-            ax.set_ylim(y_range[0] - padding, y_range[1] + padding)
+            if ax:
+                y_range = ax.get_ylim()
+                padding = 0.02 * (y_range[1] - y_range[0])
+                ax.set_ylim(y_range[0] - padding, y_range[1] + padding)
 
             # Save single interval figure
-            if plot_only_intervals:
+            if plot_single_intervals:
                 restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
                 save_file = os.path.join(target_path, dir_name,
                          f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
@@ -868,7 +908,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             if ax3:
                 ax3.legend()
 
-    if not plot_only_intervals:
+    if plot_aggregate:
         # Save input_types into json
         PLOT_PLOTLY = False
         if PLOT_PLOTLY:
@@ -885,7 +925,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
         plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
 
         # Finalize multigraph graph
-        if plot_multigraph:
+        if plot_multi_graphs:
             plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
             restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
             save_file = os.path.join(target_path, f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
@@ -908,9 +948,16 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
         #     f.write(mpld3.fig_to_html(plt.gcf()))
         plt.close()
 
-        # save detected transactions with no remixes (potentially false positives)
-        als.save_json_to_file_pretty(os.path.join(target_path, 'no_remix_txs_simplified.json'), no_remix_all)
+    # save detected transactions with no remixes (potentially false positives)
+    als.save_json_to_file_pretty(os.path.join(target_path, 'no_remix_txs_simplified.json'), no_remix_all)
 
+    # store also results over all intervals
+    result['all_changing_liquidity'] = changing_liquidity
+    result['all_stay_liquidity'] = stay_liquidity
+    result['all_remix_liquidity'] = remix_liquidity
+    result['all_changing_liquidity_timecutoff'] = changing_liquidity_timecutoff
+    result['all_stay_liquidity_timecutoff'] = stay_liquidity_timecutoff
+    return result
 
 
 def estimate_wallet_prediction_factor(all_data: dict, base_path, mix_id, prediction_matrix: dict=None,

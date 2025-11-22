@@ -2572,6 +2572,7 @@ class DumplingsParseOptions:
     PLOT_REMIXES = False
     PLOT_REMIXES_SINGLE_INTERVAL = False
     PLOT_REMIXES_MULTIGRAPH = True
+    PLOT_REMIXES_AGGREGATE = True
     PROCESS_NOTABLE_INTERVALS = False
     SPLIT_WHIRLPOOL_POOLS = False
     DETECT_COORDINATORS = False
@@ -2673,8 +2674,9 @@ class DumplingsParseOptions:
         self.DETECT_FALSE_POSITIVES = False
         self.RESTORE_FALSE_POSITIVES_FOR_OTHERS = False
         self.PLOT_REMIXES = False
-        self.PLOT_REMIXES_SINGLE_INTERVAL = False  # If True, separate standalone graph is generated for each interval
-        self.PLOT_REMIXES_MULTIGRAPH = True     # If True, all intervals are plotted together in single graph
+        self.PLOT_REMIXES_SINGLE_INTERVAL = False   # If True, separate standalone graph is generated for each interval
+        self.PLOT_REMIXES_MULTIGRAPH = False        # If True, all intervals are plotted together in single graph
+        self.PLOT_REMIXES_AGGREGATE = True          # If True, single graph with aggregated values is plotted
         self.PROCESS_NOTABLE_INTERVALS = False
         self.SPLIT_WHIRLPOOL_POOLS = False
         self.DETECT_COORDINATORS = False
@@ -2773,38 +2775,54 @@ def generate_normalized_json(base_path: str | Path, base_txs: list):
 def wasabi_plot_remixes(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: str | Path, tx_file: str,
                         analyze_values: bool = True, normalize_values: bool = True,
                         restrict_to_out_size = None, restrict_to_in_size = None,
-                        plot_multigraph: bool = True, plot_only_intervals: bool = False):
-    PARALLELIZE = True
+                        plot_multigraph: bool = False, plot_single_intervals: bool = False, plot_aggregate: bool = False):
+    PARALLELIZE = True  # Works only on Linux, not Windows
     if PARALLELIZE:
         wasabi_plot_remixes_parallel(mix_id, mix_protocol, target_path, tx_file, analyze_values, normalize_values,
-                      restrict_to_out_size, restrict_to_in_size, plot_multigraph, plot_only_intervals)
+                      restrict_to_out_size, restrict_to_in_size, plot_multigraph, plot_single_intervals, plot_aggregate)
     else:
         wasabi_plot_remixes_serial(mix_id, mix_protocol, target_path, tx_file, analyze_values, normalize_values,
-                      restrict_to_out_size, restrict_to_in_size, plot_multigraph, plot_only_intervals)
+                      restrict_to_out_size, restrict_to_in_size, plot_multigraph, plot_single_intervals, plot_aggregate)
 
 
 def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str,
-                        analyze_values: bool = True, normalize_values: bool = True,
-                        restrict_to_out_size = None, restrict_to_in_size = None,
-                        plot_multigraph: bool = True, plot_only_intervals: bool = False):
+                                 analyze_values: bool = True, normalize_values: bool = True,
+                                 restrict_to_out_size = None, restrict_to_in_size = None,
+                                 plot_multi_graphs: bool = False, plot_single_intervals: bool = False, plot_aggregate: bool = False):
     max_processes = multiprocessing.cpu_count()
-    if plot_only_intervals:
+    if plot_single_intervals:
         #
-        # Plot only single intervals
-        #
+        # Plot only single intervals, plotting done in parallel for speedup (works only on Linux, not Windows)
+        # 1. Run first over all intervals without any plotting (=>fast), obtain results with starting values for intervals
+        # 2. Run again in parallelized fashion with provided starting values for each interval (slower, but parallelized)
+        # Run without plotting
+        interval_info_file = os.path.join(target_path, 'interval_plot_stats.json')
+        if not os.path.exists(interval_info_file):
+            precomputed_results = cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
+                                             restrict_to_out_size, restrict_to_in_size,
+                                             False, False, False,  # No plotting
+                                             None, None)
+            als.save_json_to_file_pretty(interval_info_file, precomputed_results, False)
+            logging.debug(f'wasabi_plot_remixes_parallel(): computed plot results saved into {interval_info_file}')
+        else:
+            precomputed_results = als.load_json_from_file(interval_info_file)
+            logging.debug(f'wasabi_plot_remixes_parallel(): pre-computed plot results loaded from {interval_info_file}')
+
         # Get all paths, prepare separate task for each
         files = os.listdir(target_path) if os.path.exists(target_path) else print(
             f'Path {target_path} does not exist')
         only_dirs = [file for file in files if os.path.isdir(os.path.join(target_path, file))]
         files = only_dirs
 
-        ### Version with futures - works!
+        # Now run plotting in parallel
         results: List[dict] = []
         with ProcessPoolExecutor(max_workers=max_processes) as executor:
             futures = {
                 executor.submit(
                     cjvis.wasabi_plot_remixes_worker, mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER,
-                    analyze_values, normalize_values, restrict_to_out_size, restrict_to_in_size, plot_multigraph, plot_only_intervals, [file]
+                    analyze_values, normalize_values, restrict_to_out_size, restrict_to_in_size,
+                    plot_multi_graphs, plot_single_intervals, plot_aggregate,
+                    [file], precomputed_results
                 ): file for file in files
             }
             with tqdm(total=len(files)) as progress:
@@ -2819,32 +2837,25 @@ def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target
                             "status": "error",
                             "error": str(e)
                         })
+
+        return precomputed_results
     else:
         #
-        # Plot all graphs together
+        # Plot all graphs together (no parallelization)
         #
-        cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
-                            restrict_to_out_size, restrict_to_in_size, plot_multigraph, False, None)
+        return cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
+                                         restrict_to_out_size, restrict_to_in_size,
+                                         plot_multi_graphs, plot_single_intervals, plot_aggregate,
+                                         None, None)
 
 
 def wasabi_plot_remixes_serial(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str,
                         analyze_values: bool = True, normalize_values: bool = True,
                         restrict_to_out_size = None, restrict_to_in_size = None,
-                        plot_multigraph: bool = True, plot_only_intervals: bool = False):
+                        plot_multi_graphs: bool = False, plot_single_intervals: bool = False, plot_aggregate: bool = False):
 
-    if plot_only_intervals:
-        #
-        # Plot only single intervals
-        #
-        #fig_single, ax_single = plt.subplots()
-        cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
-                            restrict_to_out_size, restrict_to_in_size, plot_multigraph, True)
-    else:
-        #
-        # Plot all graphs together
-        #
-        cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
-                            restrict_to_out_size, restrict_to_in_size, plot_multigraph, False)
+    return cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
+                        restrict_to_out_size, restrict_to_in_size, plot_multi_graphs, plot_single_intervals, plot_aggregate)
 
 
 def restore_false_positives_for_others(target_path: str):
@@ -3211,7 +3222,7 @@ def main(argv=None):
             shutil.copyfile(os.path.join(target_path, mix_origin_name, 'return_cjtxs.json'),
                             os.path.join(target_path, interval_name, 'return_cjtxs.json'))
             wasabi_plot_remixes(interval_name, MIX_PROTOCOL.WASABI1, os.path.join(target_path, interval_name),
-                                'coinjoin_tx_info.json', True, False, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL)
+                                'coinjoin_tx_info.json', True, False, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
 
         if op.CJ_TYPE == CoinjoinType.WW1:
             target_load_path = os.path.join(target_path, 'wasabi1')
@@ -3494,10 +3505,14 @@ def main(argv=None):
             for mix_id in mix_ids:
                 target_base_path = os.path.join(target_path, mix_id)
                 if os.path.exists(target_base_path):
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', False, False, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL)
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', False, True, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL)
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', True, False, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL)
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', True, True, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL)
+                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', False, False, None, None,
+                                        op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
+                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', False, True, None, None,
+                                        op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
+                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', True, False, None, None,
+                                        op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
+                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', True, True, None, None,
+                                        op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
                 else:
                     logging.warning(f'Path {target_base_path} does not exists.')
 
