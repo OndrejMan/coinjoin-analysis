@@ -2676,7 +2676,7 @@ class DumplingsParseOptions:
         self.PLOT_REMIXES = False
         self.PLOT_REMIXES_SINGLE_INTERVAL = False   # If True, separate standalone graph is generated for each interval
         self.PLOT_REMIXES_MULTIGRAPH = False        # If True, all intervals are plotted together in single graph
-        self.PLOT_REMIXES_AGGREGATE = True          # If True, single graph with aggregated values is plotted
+        self.PLOT_REMIXES_AGGREGATE = False          # If True, single graph with aggregated values is plotted
         self.PROCESS_NOTABLE_INTERVALS = False
         self.SPLIT_WHIRLPOOL_POOLS = False
         self.DETECT_COORDINATORS = False

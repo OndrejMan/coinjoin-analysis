@@ -908,34 +908,37 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             if ax3:
                 ax3.legend()
 
-    if plot_aggregate:
-        # Save input_types into json
-        PLOT_PLOTLY = False
-        if PLOT_PLOTLY:
-            plotly_data = {'time': list(range(0, len(input_types[MIX_EVENT_TYPE.MIX_REMIX.name])))}
-            for input_type in input_types.keys():
-                if input_type in [MIX_EVENT_TYPE.MIX_ENTER.name, MIX_EVENT_TYPE.MIX_REMIX_FRIENDS.name, MIX_EVENT_TYPE.MIX_REMIX_FRIENDS_WW1.name, 'MIX_REMIX_1', 'MIX_REMIX_2', 'MIX_REMIX_3-5', 'MIX_REMIX_6-19', 'MIX_REMIX_20+', 'MIX_REMIX_1000-1999', 'MIX_REMIX_2000+', 'MIX_REMIX_nonstd']:
-                    plotly_data[input_type] = [value.item() for value in input_types[input_type]]
-            save_file = os.path.join(target_path, 'plotly_data.json')
-            als.save_json_to_file(save_file, plotly_data)
+    # Save input_types into json for plotly external plotting
+    PLOT_PLOTLY = False
+    if PLOT_PLOTLY:
+        plotly_data = {'time': list(range(0, len(input_types[MIX_EVENT_TYPE.MIX_REMIX.name])))}
+        for input_type in input_types.keys():
+            if input_type in [MIX_EVENT_TYPE.MIX_ENTER.name, MIX_EVENT_TYPE.MIX_REMIX_FRIENDS.name,
+                              MIX_EVENT_TYPE.MIX_REMIX_FRIENDS_WW1.name, 'MIX_REMIX_1', 'MIX_REMIX_2', 'MIX_REMIX_3-5',
+                              'MIX_REMIX_6-19', 'MIX_REMIX_20+', 'MIX_REMIX_1000-1999', 'MIX_REMIX_2000+',
+                              'MIX_REMIX_nonstd']:
+                plotly_data[input_type] = [value.item() for value in input_types[input_type]]
+        save_file = os.path.join(target_path, 'plotly_data.json')
+        als.save_json_to_file(save_file, plotly_data)
 
+    if plot_multi_graphs:
         # Add additional cummulative plots for all coinjoin in one
         ax = fig.add_subplot(NUM_ROWS, NUM_COLUMNS, ax_index, axes_class=AA.Axes)  # Get next subplot
         ax_index += 1
         plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
 
         # Finalize multigraph graph
-        if plot_multi_graphs:
-            plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
-            restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
-            save_file = os.path.join(target_path, f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
-            plt.savefig(f'{save_file}.png', dpi=300)
-            plt.savefig(f'{save_file}.pdf', dpi=300)
-            # with open(f'{save_file}.html', "w") as f:
-            #     f.write(mpld3.fig_to_html(plt.gcf()))
+        plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
+        restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
+        save_file = os.path.join(target_path, f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
+        plt.savefig(f'{save_file}.png', dpi=300)
+        plt.savefig(f'{save_file}.pdf', dpi=300)
+        # with open(f'{save_file}.html', "w") as f:
+        #     f.write(mpld3.fig_to_html(plt.gcf()))
         plt.close()
 
         # Save generate and save cummulative results separately
+    if plot_aggregate:
         fig = plt.figure(figsize=(10, 3))
         ax = fig.add_subplot(1, 1, 1, axes_class=AA.Axes)  # Get next subplot
         plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
