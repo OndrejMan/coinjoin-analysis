@@ -586,9 +586,25 @@ def analyze_multisession_mix_experiments(target_base_path: str, mix_name: str, t
 
         stats['num_overmixed_coins'][session_label] = len(num_overmixed)
 
+
+    # Compute fees paid
+    stats['experiment_cost'] = {'wallet_fair_mfee': 0, 'wallet_all_fee': 0}
+    for session_label in cjtxs['sessions'].keys():
+        wallet_fee_paid = [cjtxs['sessions'][session_label]['coinjoins'][txid].get('wallet_fee_paid', 0)
+                   for txid in cjtxs['sessions'][session_label]['coinjoins'].keys()]
+        wallet_fairmfee_paid = [cjtxs['sessions'][session_label]['coinjoins'][txid].get('wallet_fair_mfee', 0)
+                   for txid in cjtxs['sessions'][session_label]['coinjoins'].keys()]
+        assert all(v > 0 for v in wallet_fee_paid), f'Unexpected fees: {wallet_fee_paid}'
+        assert all(v > 0 for v in wallet_fairmfee_paid), f'Unexpected fees: {wallet_fairmfee_paid}'
+        stats['experiment_cost']['wallet_fair_mfee'] += sum(wallet_fairmfee_paid)
+        stats['experiment_cost']['wallet_all_fee'] += sum(wallet_fee_paid)
+
     print(f'\n{mix_name}: Total experiments: {len(cjtxs['sessions'])}, total txs={len(history)}, '
           f'total coins: {sum([stats['num_coins'][session_label] for session_label in stats['num_coins'].keys()])}, '
-          f'total overmixed coins: {sum([len([stats['num_overmixed_coins'][session_label] for session_label in stats['num_overmixed_coins'].keys()])])}')
+          f'total overmixed coins: {sum([len([stats['num_overmixed_coins'][session_label] for session_label in stats['num_overmixed_coins'].keys()])])},'
+          f"mining fee cost: {stats['experiment_cost']['wallet_fair_mfee']}, "
+          f"coord. fee cost: {stats['experiment_cost']['wallet_all_fee'] - stats['experiment_cost']['wallet_fair_mfee']}, "
+          f"total fee cost: {stats['experiment_cost']['wallet_all_fee']}")
 
     print("##################################################")
 
@@ -695,7 +711,7 @@ def full_analyze_as25_202405_only1m(base_path: str):
     problematic_sessions = ['mix1 0.1btc | 12 cjs | txid: 34', 'mix2 0.2btc']  # Remove all 0.2 sessions + one problematic 0.1
     wallets_names = ['mix1', 'mix2', 'mix3']
     return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
-                          wallets_names, problematic_sessions, 16)
+                          wallets_names, problematic_sessions, 16, '_0.1btc_')
 
 
 def full_analyze_as25_202405_only2m(base_path: str):
@@ -706,7 +722,7 @@ def full_analyze_as25_202405_only2m(base_path: str):
     problematic_sessions = ['mix1 0.1', 'mix2 0.1', 'mix3 0.1']  # remove all 0.1 sessions
     wallets_names = ['mix1', 'mix2', 'mix3']
     return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
-                          wallets_names, problematic_sessions, 7)
+                          wallets_names, problematic_sessions, 7, '_0.2btc_')
 
 
 def full_analyze_as38_202503(base_path: str):
@@ -726,7 +742,7 @@ def full_analyze_as38_202503(base_path: str):
 
 
 def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, experiment_target_anonscore: int,
-                          wallets_names: list, problematic_sessions: list, assert_num_expected_sessions: int):
+                          wallets_names: list, problematic_sessions: list, assert_num_expected_sessions: int, addon_label: str=""):
     all_cjs = {}
     all_stats = {}
 
@@ -781,9 +797,9 @@ def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, expe
         assert len(all_stats['anon_percentage_status']) == assert_num_expected_sessions, f'Unexpected number of coinjoin sessions {len(all_stats['anon_percentage_status'])}'
 
     # Save extracted information
-    save_path = os.path.join(target_path, f'as{experiment_target_anonscore}_coinjoin_tx_info.json')
+    save_path = os.path.join(target_path, f'as{experiment_target_anonscore}{addon_label}coinjoin_tx_info.json')
     als.save_json_to_file_pretty(save_path, all_cjs)
-    save_path = os.path.join(target_path, f'as{experiment_target_anonscore}_stats.json')
+    save_path = os.path.join(target_path, f'as{experiment_target_anonscore}{addon_label}stats.json')
     als.save_json_to_file_pretty(save_path, all_stats)
 
     # Plot graphs
