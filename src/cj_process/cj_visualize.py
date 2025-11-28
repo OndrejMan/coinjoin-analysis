@@ -26,9 +26,11 @@ from cj_process import cj_visualize as cjvis
 #SLOT_WIDTH_SECONDS = 3600 * 24  # day
 SLOT_WIDTH_SECONDS = 3600   # hour
 
+LEGEND_FONT_SIZE = 8
 #LEGEND_FONT_SIZE = 'small'
-LEGEND_FONT_SIZE = 'medium'
+#LEGEND_FONT_SIZE = 'medium'
 
+DEFAULT_AXIS_LABEL_SIZE = 14
 
 def list_get(lst, idx, default=None):
     return lst[idx] if -len(lst) <= idx < len(lst) else default
@@ -620,6 +622,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             fig_single = None
             if plot_single_intervals:
                 fig_single, ax_to_use = plt.subplots(figsize=(20, 10))  # Figure for single plot
+                #fig_single, ax_to_use = plt.subplots(figsize=(10, 2.5))  # Figure for single plot
             elif plot_multi_graphs:
                 ax_to_use = fig.add_subplot(NUM_ROWS, NUM_COLUMNS, ax_index, axes_class=AA.Axes)  # Get next subplot
                 ax_index += 1
@@ -664,7 +667,6 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 if input_type not in input_types.keys():
                     input_types[input_type] = []
                 input_types[input_type].extend(input_types_interval[input_type])
-
             # Add current total mix liquidity into the same graph
             ax2 = ax.twinx() if ax else None
             #plot_ax = ax2 if plot_multi_graphs else None
@@ -753,6 +755,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
 
             # Save single interval figure
             if plot_single_intervals:
+                plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
+
                 restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
                 save_file = os.path.join(target_path, dir_name,
                          f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
@@ -928,7 +932,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
         plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
 
         # Finalize multigraph graph
-        plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
+        plt.subplots_adjust(bottom=0.1, wspace=0.25, hspace=0.4)
+        plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
         restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
         save_file = os.path.join(target_path, f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
         plt.savefig(f'{save_file}.png', dpi=300)
@@ -943,6 +948,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
         ax = fig.add_subplot(1, 1, 1, axes_class=AA.Axes)  # Get next subplot
         plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
         plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
+        plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
         restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
         save_file = os.path.join(target_path, f'{mix_id}_cummul_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
         plt.savefig(f'{save_file}.png', dpi=300)
@@ -1064,12 +1070,13 @@ def estimate_wallet_prediction_factor(all_data: dict, base_path, mix_id, predict
     predicted_wallets_outputs_cihi_avg = als.smooth_interval(predicted_wallets_list_outputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cihi else None
 
     if ax_provided == None:
-        fig_single, ax = plt.subplots(figsize=(10, 3))  # Figure for single plot
+        fig_single, ax = plt.subplots(figsize=(16, 4))  # Figure for single plot
     else:
         ax = ax_provided
     # Plot explict time ticks instead of default ones
     plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
     ax.set_xlabel('coinjoin in time')
+    plt.xticks(fontsize=DEFAULT_AXIS_LABEL_SIZE)
 
     PLOT_NUM_WALLETS = True
     FULL_LEGEND = False
@@ -1455,7 +1462,7 @@ def plot_inputs_type_ratio(mix_id: str, data: dict, initial_cj_index: int, ax, a
         if analyze_values and normalize_values:
             ax.set_ylabel('Fraction of inputs values')
         if analyze_values and not normalize_values:
-            ax.set_ylabel('Inputs values (btc)')
+            ax.set_ylabel('Inputs values (btc)', fontsize=DEFAULT_AXIS_LABEL_SIZE)
         if not analyze_values and normalize_values:
             ax.set_ylabel('Fraction of input numbers')
         if not analyze_values and not normalize_values:
@@ -1588,7 +1595,7 @@ def plot_mix_liquidity(mix_id: str, data: dict, initial_liquidity, time_liquidit
         if PLOT_LEAVE_TIMECUTOFF:
             ax.plot(liquidity_timecutoff_btc, color='blue', alpha=0.6, linestyle='--')
 
-        ax.set_ylabel('btc in mix', color='royalblue')
+        ax.set_ylabel('btc in mix', color='royalblue', fontsize=DEFAULT_AXIS_LABEL_SIZE)
         ax.tick_params(axis='y', colors='royalblue')
 
     return cjtx_cummulative_liquidity, stay_liquidity, remix_liquidity, cjtx_cummulative_liquidity_timecutoff, stay_liquidity_timecutoff

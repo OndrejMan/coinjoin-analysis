@@ -19,6 +19,8 @@ from matplotlib import pyplot as plt
 from cj_process import cj_visualize as cjvis
 from cj_process import cj_consts as cjc
 from cj_process import cj_analysis as als
+from cj_process.cj_visualize import DEFAULT_AXIS_LABEL_SIZE
+
 
 def analyze_coordinator_detection(cjtxs: dict, tx_list: dict, coords: List):
     # Transform dictionary to {'coord': [cjtxs]} format
@@ -473,15 +475,18 @@ def analyze_impact_session_tx_removed_predictions(op, target_path):
             predicted_wallets_inputs[drop_num] = predicted_wallets_inputs_avg
 
         fig_single, ax = plt.subplots(figsize=(10, 4))
+        plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
+
         # Plot base estimation from outputs
         predict_matrix = als.load_json_from_file(os.path.join(target_path, f'{name_template}.json'))
         cjvis.estimate_wallet_prediction_factor(all_data, target_path, coord, predict_matrix['0.05'], False, True, ax)
         for drop_num in predicted_wallets_inputs.keys():
             ax.plot(predicted_wallets_inputs[drop_num],
-                    label=f'first {drop_num} cjtxs dropped',
+                    label=f'{drop_num} cjtxs dropped',
                     alpha=0.5, linewidth=0.5)
         save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops')
         ax.legend(loc='upper left')
+        plt.legend().set_visible(False)
         plt.savefig(f'{save_path}.png', dpi=300)
         plt.savefig(f'{save_path}.pdf', dpi=300)
 
@@ -531,7 +536,12 @@ def analyze_impact_session_tx_removed_predictions2(op, target_path):
 
 
         # Compute means for each BLOCK_LENGTH coinjoins
-        BLOCK_LENGTH = 1000
+        SINGLE_BAR = True
+        if SINGLE_BAR:
+            BLOCK_LENGTH = 100000
+        else:
+            BLOCK_LENGTH = 1000
+
         all_means = []
         drop_num_array = []
         for drop_num in predicted_wallets_diff.keys():
@@ -544,10 +554,16 @@ def analyze_impact_session_tx_removed_predictions2(op, target_path):
         max_len = max(len(m) for m in all_means)
         x = np.arange(max_len)  # block indices
         width = 0.8 / n_sets  # bar width so groups don’t overlap
-        fig_single, ax = plt.subplots(figsize=(10, 4))
+        if SINGLE_BAR:
+            fig_single, ax = plt.subplots(figsize=(4, 4))
+        else:
+            fig_single, ax = plt.subplots(figsize=(10, 4))
         for idx, means in enumerate(all_means):
             offset = (idx - n_sets / 2) * width + width / 2
             plt.bar(x + offset, means, width=width, label=f"First {drop_num_array[idx]} transactions omitted")
+        plt.ylabel("mean # wallets difference ")
+        if SINGLE_BAR:
+            plt.xticks([])
         save_path = os.path.join(target_path, coord, f'{coord}_wallets_predictions_drops_bars')
         ax.legend(loc='lower left')
         plt.savefig(f'{save_path}.png', dpi=300)
