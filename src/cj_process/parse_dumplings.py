@@ -3219,9 +3219,9 @@ def main(argv=None):
             process_and_save_single_interval(interval_name, all_data, mix_type, target_path, start_date, end_date)
             shutil.copyfile(os.path.join(target_path, mix_origin_name, 'fee_rates.json'),
                             os.path.join(target_path, interval_name, 'fee_rates.json'))
-            shutil.copyfile(os.path.join(target_path, mix_origin_name, 'return_cjtxs.json'),
-                            os.path.join(target_path, interval_name, 'return_cjtxs.json'))
-            wasabi_plot_remixes(interval_name, MIX_PROTOCOL.WASABI1, os.path.join(target_path, interval_name),
+            shutil.copyfile(os.path.join(target_path, mix_origin_name, 'false_cjtxs.json'),
+                            os.path.join(target_path, interval_name, 'false_cjtxs.json'))
+            wasabi_plot_remixes(interval_name, mix_type, os.path.join(target_path, interval_name),
                                 'coinjoin_tx_info.json', True, False, None, None, op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
 
         if op.CJ_TYPE == CoinjoinType.WW1:
@@ -3238,10 +3238,16 @@ def main(argv=None):
             process_joint_interval('wasabi1', 'wasabi1__2022_04-05', all_data, MIX_PROTOCOL.WASABI1, target_path, '2022-04-23 00:00:07.000', '2022-05-06 23:59:59.000')
 
         if op.CJ_TYPE == CoinjoinType.WW2:
-            target_load_path = os.path.join(target_path, 'wasabi2')
+            op.PLOT_REMIXES_SINGLE_INTERVAL = True
+
+            # Nicely visible remix patterns for opencoordinator, March 2025
+            target_load_path = os.path.join(target_path, 'wasabi2_opencoordinator')
             all_data = als.load_coinjoins_from_file(os.path.join(target_load_path), None, True)
+            process_joint_interval('wasabi2_opencoordinator', 'wasabi2_opencoordinator__2025_03', all_data, MIX_PROTOCOL.WASABI2, target_path, '2025-03-07 00:00:07.000', '2025-03-12 23:59:59.000')
 
             # Large inflow, in 2023-12, slightly mixed, send out, received as friend, then remixed
+            target_load_path = os.path.join(target_path, 'wasabi2')
+            all_data = als.load_coinjoins_from_file(os.path.join(target_load_path), None, True)
             process_joint_interval('wasabi2', 'wasabi2__2023_12-01', all_data, MIX_PROTOCOL.WASABI2, target_path, '2023-12-20 00:00:07.000', '2024-01-30 23:59:59.000')
 
         if op.CJ_TYPE == CoinjoinType.SW:
