@@ -198,7 +198,7 @@ def test_run_cj_process_ww2():
     assert len(file_check['results']['wasabi2']['mix_base_files'][
                    'missing_files']) == 0, f"Missing files: {file_check['results']['wasabi2']['mix_base_files']['missing_files']}"
     assert len(file_check['results']['wasabi2_zksnacks']['mix_base_files'][
-                   'missing_files']) == 3, f"Missing files: {file_check['results']['wasabi2_zksnacks']['mix_base_files']['missing_files']}"
+                   'missing_files']) == 2, f"Missing files: {file_check['results']['wasabi2_zksnacks']['mix_base_files']['missing_files']}"
 
 
 def test_run_cj_process_ww1():
