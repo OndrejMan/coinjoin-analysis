@@ -1570,11 +1570,14 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
     no_remix_all = {'recent__inputs_noremix': {}, 'recent__outputs_noremix': {}, 'recent__both_noremix': {},
                     'recent__inputs_address_reuse': {}, 'recent__outputs_address_reuse': {},
                     'recent__both_reuse': {}, 'recent__stdenom_rbf_notap_onechange': {}, 'recent__local_outliers': {},
+                    'recent__unbalanced_inouts': {},
                     'inputs_noremix': {}, 'outputs_noremix': {}, 'both_noremix': {},
                     'inputs_address_reuse': {}, 'outputs_address_reuse': {},
                     'both_reuse': {}, 'specific_denoms_noremix_in': {}, 'specific_denoms_noremix_out':{},
-                    'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {}, 'stdenom_rbf_notap_onechange': {}, 'local_outliers': {}}
+                    'specific_denoms_noremix_both':{}, 'specific_denoms_noremix_inorout': {},
+                    'stdenom_rbf_notap_onechange': {}, 'local_outliers': {}, 'unbalanced_inouts': {}}
     for dir_name in files:
+        SM.print(f'Processing path {dir_name}')
         target_base_path = os.path.join(target_path, dir_name)
         tx_json_file = os.path.join(target_base_path, f'{tx_file}')
         if os.path.isdir(target_base_path) and os.path.exists(tx_json_file):
@@ -1595,7 +1598,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
             no_remix = als.detect_no_inout_remix_txs(data["coinjoins"])
             for key in no_remix.keys():
                 no_remix_all[key].update(no_remix[key])
-                print(f'NO_REMIX {key}={len(no_remix_all[key])}')
+                SM.print(f'NO_REMIX {key}={len(no_remix_all[key])}')
                 for txid in no_remix_all[key]:
                     print(f"NO_REMIX {txid}={data['coinjoins'][txid]['flags_str']}")
 
@@ -1603,7 +1606,14 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
             address_reuse = als.detect_address_reuse_txs(data["coinjoins"], REUSE_THRESHOLD)
             for key in address_reuse.keys():
                 no_remix_all[key].update(address_reuse[key])
-                print(f'ADDRESS_REUSE {key}:{len(address_reuse[key])}')
+                SM.print(f'ADDRESS_REUSE {key}:{len(address_reuse[key])}')
+
+            # Detect transactions with highly unbalanced number of inputs to outputs
+            UNBALANCED_THRESHOLD = 0.7
+            unbalanced_inputs_outputs = als.detect_unbalanced_inout_txs(data["coinjoins"], UNBALANCED_THRESHOLD)
+            for key in unbalanced_inputs_outputs.keys():
+                no_remix_all[key].update(unbalanced_inputs_outputs[key])
+                SM.print(f'UNBALANCED_INOUTS {key}:{len(unbalanced_inputs_outputs[key])}')
 
             # For all no_remix hits detect the RBF and Taproot usage
             DETECT_STDDENOM_RBF_NOTAP_ONECHANGE = True
@@ -1612,7 +1622,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
                 stdenom_rbf_notap_onechange = als.detect_stdenom_rbf_notap_onechange_txs(data["coinjoins"])
                 for key in stdenom_rbf_notap_onechange.keys():
                     no_remix_all[key].update(stdenom_rbf_notap_onechange[key])
-                    print(f'STDDENOM_RBF_NOTAP_ONECHANGE {key}={len(stdenom_rbf_notap_onechange[key])}')
+                    SM.print(f'STDDENOM_RBF_NOTAP_ONECHANGE {key}={len(stdenom_rbf_notap_onechange[key])}')
 
             # Detect type ouliers
             DETECT_STRUCTURE_OUTLIERS = True
@@ -1623,7 +1633,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
                 local_outliers = als.detect_local_outliers_txs(data["coinjoins"], OUTLIER_WINDOW, OUTLIER_THRESHOLD)
                 for key in local_outliers.keys():
                     no_remix_all[key].update(local_outliers[key])
-                    print(f'LOCAL_OUTLIERS {key}={len(local_outliers[key])}')
+                    SM.print(f'LOCAL_OUTLIERS {key}={len(local_outliers[key])}')
                     for txid in no_remix_all[key]:
                         print(f"LOCAL_OUTLIERS {txid}:{data['coinjoins'][txid]['flags_str']}")
 

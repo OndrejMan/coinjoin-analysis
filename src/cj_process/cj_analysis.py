@@ -150,6 +150,25 @@ def detect_address_reuse_txs(coinjoins, reuse_threshold: float):
     return addr_reuse
 
 
+def detect_unbalanced_inout_txs(coinjoins, unbalance_threshold: float):
+    """
+    Detect transactions with unbalanced number of inputs and outputs.
+    :param coinjoins: structure with all coinjoins
+    :param unbalance_threshold: value between 0 and 1. Higher the threshold, more significant ratio between inputs and outputs is required to classify as hit
+    :return: detected txs with unbalanced number of inputs to outputs
+    """
+    results = {'unbalanced_inouts': {}}
+    for cjtx in coinjoins.keys():
+        num_ins = len(coinjoins[cjtx]['inputs'])
+        num_outs = len(coinjoins[cjtx]['outputs'])
+
+        denom = max(abs(num_ins), abs(num_outs))
+        if denom != 0 and abs(num_ins - num_outs) / denom >= unbalance_threshold:
+            results['unbalanced_inouts'][cjtx] = coinjoins[cjtx]['broadcast_time']
+
+    return results
+
+
 def detect_specific_cj_denoms(coinjoins: dict, specific_denoms_list: list, min_times_most_frequent_denom: int, exact_times_least_frequent_denom: int):
     specific_denoms = {'specific_denoms': {}}
     for cjtx in coinjoins.keys():
