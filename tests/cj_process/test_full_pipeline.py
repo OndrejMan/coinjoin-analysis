@@ -296,21 +296,13 @@ def test_run_cj_process_ww1():
         "total_leaving_outputs_value": 82.07733556,
         "total_nonstandard_leaving_outputs_value": 27.06086313},
 
-        # "wasabi1_zksnacks": {"total_fresh_inputs_value": 934.54815701, "total_friends_inputs_value": 0.0,
-        #                      "total_unmoved_outputs_value": 838.22085515, "total_leaving_outputs_value": 96.31540543,
-        #                      "total_nonstandard_leaving_outputs_value": 39.21255878,
-        #                      "total_fresh_inputs_without_nonstandard_outputs_value": 895.33559823},
         "wasabi1_others": {"total_fresh_inputs_value": 1712.38062822,
         "total_friends_inputs_value": 0.0,
         "total_unmoved_outputs_value": 1044.88849035,
         "total_leaving_outputs_value": 487.77190196,
         "total_nonstandard_leaving_outputs_value": 473.41247934,
         "total_fresh_inputs_without_nonstandard_outputs_value": 1238.96814888}}
-        # "wasabi1_others": {"total_fresh_inputs_value": 1800.87207463, "total_friends_inputs_value": 0.0,
-        #                    "total_unmoved_outputs_value": 1118.58730176, "total_leaving_outputs_value": 489.54757815,
-        #                    "total_nonstandard_leaving_outputs_value": 473.459393,
-        #                    "total_fresh_inputs_without_nonstandard_outputs_value": 1327.41268163,
-        #                    }}
+
     for coord in expected_results.keys():
         with open(os.path.join(extract_dir, "Scanner", f"liquidity_summary_{coord}.json"), "r") as file:
             results = orjson.loads(file.read())
