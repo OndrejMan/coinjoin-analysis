@@ -2019,14 +2019,16 @@ def wasabi2_extract_pools_destroys_data(data: dict, target_path: str, interval_s
 
     split_pools_info = {}
     # Extract post-zksnacks coordinator(s)
-    # Rule: only after 2024-06-02, with few transactions from 2024-05-30 but with lower than 150 inputs (which is minimum for zkSNACKs)
+    # Rule: only after 2024-06-02, with few additional transactions from 2024-05-01 but with lower than 150 inputs (which is minimum for zkSNACKs)
     interval_start_date_others = '2024-05-01 00:00:00.000'
+    interval_stop_date_zksnacks = "2024-06-02 00:42:00.0000"
     cjtx_others = {cjtx: data["coinjoins"][cjtx] for cjtx in data["coinjoins"].keys() if data["coinjoins"][cjtx][
-        'broadcast_time'] > "2024-06-02 00:00:00.000"}
-    logging.debug(f'cjtx_others len={len(cjtx_others)}')
-    cjtx_others_overlap = {cjtx:data["coinjoins"][cjtx] for cjtx in data["coinjoins"].keys() if data["coinjoins"][cjtx][
-        'broadcast_time'] > interval_start_date_others and data["coinjoins"][cjtx][
-        'broadcast_time'] < "2024-06-02 00:00:00.000" and len(data["coinjoins"][cjtx]['inputs']) < 150}
+        'broadcast_time'] > interval_stop_date_zksnacks}  # For sure non-zksnacks as that coordinator was already shutdown
+    logging.debug(f'cjtx_others len={len(cjtx_others)} (certainly post-zksnacks)')
+    # All small (<150) transactions from period interval_start_date_others and interval_stop_date_zksnacks (no others had large enough transactions)
+    cjtx_others_overlap = {cjtx: data["coinjoins"][cjtx] for cjtx in data["coinjoins"].keys()
+                           if interval_start_date_others <= data["coinjoins"][cjtx]['broadcast_time'] <= interval_stop_date_zksnacks
+                           and len(data["coinjoins"][cjtx]['inputs']) < 150}
     logging.debug(f'cjtx_others_overlap len={len(cjtx_others_overlap)}')
     cjtx_others.update(cjtx_others_overlap)
     logging.debug(f'cjtx_others joined len={len(cjtx_others)}')
@@ -2035,14 +2037,13 @@ def wasabi2_extract_pools_destroys_data(data: dict, target_path: str, interval_s
     SM.print(f'Total cjtxs extracted for pool WW2-others: {len(cjtx_others)}')
 
     # Extract zksnacks coordinator
-    # Rule: All till 2024-06-02 00:00:00.000, in final 10 days must have >= 150 inputs
-    interval_stop_date_zksnacks = "2024-06-03 00:00:00.000"
+    # Rule: All till 2024-06-02 00:00:00.000, in final month (first non-zksnacks detected in May/2024) must have >= 150 inputs
     cjtx_zksnacks_keys = {cjtx: None for cjtx in data["coinjoins"].keys() if data["coinjoins"][cjtx][
-        'broadcast_time'] < "2024-05-20 00:00:00.000"}
+        'broadcast_time'] < interval_start_date_others}
     logging.debug(f'cjtx_zksnacks len={len(cjtx_zksnacks_keys)}')
-    cjtx_zksnacks_overlap_keys = {cjtx: None for cjtx in data["coinjoins"].keys() if data["coinjoins"][cjtx][
-        'broadcast_time'] > "2024-05-20 00:00:00.000" and data["coinjoins"][cjtx]['broadcast_time'] < interval_stop_date_zksnacks
-                             and len(data["coinjoins"][cjtx]['inputs']) >= 150}
+    cjtx_zksnacks_overlap_keys = {cjtx: None for cjtx in data["coinjoins"].keys()
+                                  if interval_start_date_others <= data["coinjoins"][cjtx]['broadcast_time'] <= interval_stop_date_zksnacks
+                                  and len(data["coinjoins"][cjtx]['inputs']) >= 150}
     logging.debug(f'cjtx_zksnacks_overlap len={len(cjtx_zksnacks_overlap_keys)}')
     cjtx_zksnacks_keys.update(cjtx_zksnacks_overlap_keys)
     logging.debug(f'cjtx_zksnacks joined len={len(cjtx_zksnacks_keys)}')
@@ -2051,7 +2052,7 @@ def wasabi2_extract_pools_destroys_data(data: dict, target_path: str, interval_s
     non_zksnacks_cjtxs = [cjtx for cjtx in data["coinjoins"].keys() if cjtx not in cjtx_zksnacks_keys]
     for cjtx in non_zksnacks_cjtxs:
         del data["coinjoins"][cjtx]
-
+    assert len(data["coinjoins"]) == len(cjtx_zksnacks_keys)
     target_save_path = os.path.join(target_path, 'wasabi2_zksnacks')
     split_pools_info['wasabi2_zksnacks'] = {'pool_name': 'wasabi2_zksnacks', 'start_date': '2022-06-01 00:00:07.000', 'stop_date': interval_stop_date_zksnacks,
                                            'num_cjtxs': len(cjtx_zksnacks_keys)}
@@ -2059,7 +2060,7 @@ def wasabi2_extract_pools_destroys_data(data: dict, target_path: str, interval_s
     if not os.path.exists(target_save_path):
         os.makedirs(target_save_path.replace('\\', '/'))
     als.save_json_to_file(os.path.join(target_save_path, 'coinjoin_tx_info.json'), data)
-    SM.print(f'Total cjtxs extracted for pool WW2-zkSNACKs: {len(data)}')
+    SM.print(f'Total cjtxs extracted for pool WW2-zkSNACKs: {len(data["coinjoins"])}')
     # IMPORTANT Explicitly change data dictionary to empty one as we already modified it inplace for peak memory requirements
     data.clear()  # Clears the original dictionary
     data["deleted"] = "deleted"
