@@ -1054,7 +1054,8 @@ def estimate_wallet_prediction_factor(all_data: dict, base_path, mix_id, predict
             predicted_wallets_list_outputs.append(prediction_matrix['outputs'][str(num_outputs)]['N_hat'])
             predicted_wallets_list_outputs_cilo.append(prediction_matrix['outputs'][str(num_outputs)]['ci_lo'])
             predicted_wallets_list_outputs_cihi.append(prediction_matrix['outputs'][str(num_outputs)]['ci_hi'])
-        else:
+    else:
+        for i in range(0, len(sorted_cj_time)):
             # Use computed prediction factor if available
             if list_get(used_prediction_ratios, i, -1) != -1:
                 predicted_num_wallets = int(round(num_all_inputs[i] / used_prediction_ratios[i]))
