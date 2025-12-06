@@ -198,7 +198,7 @@ def test_run_cj_process_ww2():
     assert len(file_check['results']['wasabi2']['mix_base_files'][
                    'missing_files']) == 0, f"Missing files: {file_check['results']['wasabi2']['mix_base_files']['missing_files']}"
     assert len(file_check['results']['wasabi2_zksnacks']['mix_base_files'][
-                   'missing_files']) == 3, f"Missing files: {file_check['results']['wasabi2_zksnacks']['mix_base_files']['missing_files']}"
+                   'missing_files']) == 2, f"Missing files: {file_check['results']['wasabi2_zksnacks']['mix_base_files']['missing_files']}"
 
 
 def test_run_cj_process_ww1():
@@ -243,7 +243,7 @@ def test_run_cj_process_ww1():
             assert len(results[
                            'inputs_noremix']) == 12, f"Expected {12} no inputs remix coinjoins, got {len(results['inputs_noremix'])}"
             assert len(results[
-                           'outputs_noremix']) == 6, f"Expected {6} no outputs remix coinjoins, got {len(results['outputs_noremix'])}"
+                           'outputs_noremix']) == 4, f"Expected {4} no outputs remix coinjoins, got {len(results['outputs_noremix'])}"
             assert len(results[
                            'both_noremix']) == 2, f"Expected {2} both no remix coinjoins, got {len(results['both_noremix'])}"
             assert len(results[
@@ -290,15 +290,19 @@ def test_run_cj_process_ww1():
     # ASSERT
 
     expected_results = {
-        "wasabi1_zksnacks": {"total_fresh_inputs_value": 934.54815701, "total_friends_inputs_value": 0.0,
-                             "total_unmoved_outputs_value": 838.22085515, "total_leaving_outputs_value": 96.31540543,
-                             "total_nonstandard_leaving_outputs_value": 39.21255878,
-                             "total_fresh_inputs_without_nonstandard_outputs_value": 895.33559823},
-        "wasabi1_others": {"total_fresh_inputs_value": 1800.87207463, "total_friends_inputs_value": 0.0,
-                           "total_unmoved_outputs_value": 1118.58730176, "total_leaving_outputs_value": 489.54757815,
-                           "total_nonstandard_leaving_outputs_value": 473.459393,
-                           "total_fresh_inputs_without_nonstandard_outputs_value": 1327.41268163,
-                           }}
+        "wasabi1_zksnacks": { "total_fresh_inputs_value": 982.69008188,
+        "total_friends_inputs_value": 0.0,
+        "total_unmoved_outputs_value": 900.60000666,
+        "total_leaving_outputs_value": 82.07733556,
+        "total_nonstandard_leaving_outputs_value": 27.06086313},
+
+        "wasabi1_others": {"total_fresh_inputs_value": 1712.38062822,
+        "total_friends_inputs_value": 0.0,
+        "total_unmoved_outputs_value": 1044.88849035,
+        "total_leaving_outputs_value": 487.77190196,
+        "total_nonstandard_leaving_outputs_value": 473.41247934,
+        "total_fresh_inputs_without_nonstandard_outputs_value": 1238.96814888}}
+
     for coord in expected_results.keys():
         with open(os.path.join(extract_dir, "Scanner", f"liquidity_summary_{coord}.json"), "r") as file:
             results = orjson.loads(file.read())

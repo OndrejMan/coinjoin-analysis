@@ -5,11 +5,12 @@ from pathlib import Path
 from html import escape
 
 from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, ScalarFormatter, FuncFormatter, NullFormatter, LogLocator, FixedLocator
 import matplotlib.dates as mdates
 import mpl_toolkits.axisartist as AA
 
 import numpy as np
+from matplotlib.transforms import ScaledTranslation
 from scipy.optimize import minimize
 from scipy import stats
 
@@ -19,15 +20,17 @@ from cj_process.cj_consts import *
 from cj_process.cj_structs import *
 
 from cj_process import cj_analysis as als
-
+from cj_process import cj_visualize as cjvis
 
 # SLOT_WIDTH_SECONDS = 3600 * 24 * 7  # week
 #SLOT_WIDTH_SECONDS = 3600 * 24  # day
 SLOT_WIDTH_SECONDS = 3600   # hour
 
+LEGEND_FONT_SIZE = 8
 #LEGEND_FONT_SIZE = 'small'
-LEGEND_FONT_SIZE = 'medium'
+#LEGEND_FONT_SIZE = 'medium'
 
+DEFAULT_AXIS_LABEL_SIZE = 14
 
 def list_get(lst, idx, default=None):
     return lst[idx] if -len(lst) <= idx < len(lst) else default
@@ -537,10 +540,13 @@ def plot_month_year_separators(new_month_indices, separators_to_plot, ax2):
 
 
 def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str, sort_coinjoins_relative_order: bool,
-                        analyze_values: bool = True, normalize_values: bool = True,
-                        restrict_to_out_size = None, restrict_to_in_size = None,
-                        plot_multigraph: bool = True, plot_only_intervals: bool=False, filter_paths: list=None):
+                               analyze_values: bool = True, normalize_values: bool = True,
+                               restrict_to_out_size = None, restrict_to_in_size = None,
+                               plot_multi_graphs: bool=False, plot_single_intervals: bool=False, plot_aggregate: bool=False,
+                               filter_paths: list=None, initial_ranges_values: dict=None):
     logging.info(f"Starting next worker")
+
+    result = {}
 
     als.SORT_COINJOINS_BY_RELATIVE_ORDER = sort_coinjoins_relative_order
 
@@ -562,7 +568,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                       if os.path.isdir(os.path.join(target_path, dir_name)) and
                       os.path.exists(os.path.join(target_path, dir_name, f'{tx_file}'))])
 
-    if not plot_only_intervals:
+    if plot_multi_graphs or plot_aggregate:
         NUM_COLUMNS = 3
         NUM_ADDITIONAL_GRAPHS = 1 + NUM_COLUMNS
         NUM_ROWS = int((num_months + NUM_ADDITIONAL_GRAPHS) / NUM_COLUMNS + 1)
@@ -594,6 +600,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
     for dir_name in sorted(files):
         if dir_name not in filter_paths:  # Process only for selected paths
             continue
+
+        result[dir_name] = {}
         target_base_path = os.path.join(target_path, dir_name)
         tx_json_file = os.path.join(target_base_path, f'{tx_file}')
         current_year = dir_name[0:4]
@@ -612,11 +620,14 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                     continue
 
             fig_single = None
-            if plot_only_intervals:
+            if plot_single_intervals:
                 fig_single, ax_to_use = plt.subplots(figsize=(20, 10))  # Figure for single plot
-            else:
+                #fig_single, ax_to_use = plt.subplots(figsize=(10, 2.5))  # Figure for single plot
+            elif plot_multi_graphs:
                 ax_to_use = fig.add_subplot(NUM_ROWS, NUM_COLUMNS, ax_index, axes_class=AA.Axes)  # Get next subplot
                 ax_index += 1
+            else:
+                ax_to_use = None
 
             ax = ax_to_use
 
@@ -627,8 +638,9 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 if dates[i].day != dates[i - 1].day:
                     new_day_indices.append(('day', i))
             #print(new_day_indices)
-            for pos in new_day_indices:
-                ax.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.2)
+            if ax:
+                for pos in new_day_indices:
+                    ax.axvline(x=pos[1], color='gray', linewidth=1, alpha=0.2)
 
             # Store index of coinjoins within this month (to be printed later in cummulative graph)
             if current_year == prev_year:
@@ -647,27 +659,56 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 no_remix_all[key].extend(no_remix[key])
 
             # Plot bars corresponding to different input types
-            plot_ax = ax if plot_multigraph else None
+            #plot_ax = ax if plot_multi_graphs else None
+            plot_ax = ax
+
             input_types_interval = plot_inputs_type_ratio(f'{mix_id} {dir_name}', data, initial_cj_index, plot_ax, analyze_values, normalize_values, restrict_to_in_size)
             for input_type in input_types_interval:
                 if input_type not in input_types.keys():
                     input_types[input_type] = []
                 input_types[input_type].extend(input_types_interval[input_type])
-
             # Add current total mix liquidity into the same graph
-            ax2 = ax.twinx()
-            plot_ax = ax2 if plot_multigraph else None
+            ax2 = ax.twinx() if ax else None
+            #plot_ax = ax2 if plot_multi_graphs else None
+            plot_ax = ax2
+
+            # Set initial value for given intervale based on previous intervals (if provided)
+            start_changing_liquidity = changing_liquidity[-1]
+            start_stay_liquidity = stay_liquidity[-1]
+            start_remix_liquidity = remix_liquidity[-1]
+            start_changing_liquidity_timecutoff = changing_liquidity_timecutoff[-1]
+            start_stay_liquidity_timecutoff = stay_liquidity_timecutoff[-1]
+            if initial_ranges_values:  # If provided, use this as start values for liquidity instead
+                start_changing_liquidity = initial_ranges_values[dir_name]['start_changing_liquidity']
+                start_stay_liquidity = initial_ranges_values[dir_name]['start_stay_liquidity']
+                start_remix_liquidity = initial_ranges_values[dir_name]['start_remix_liquidity']
+                start_changing_liquidity_timecutoff = initial_ranges_values[dir_name]['start_changing_liquidity_timecutoff']
+                start_stay_liquidity_timecutoff = initial_ranges_values[dir_name]['start_stay_liquidity_timecutoff']
+            # Save initial value for the given interval
+            result[dir_name]['start_changing_liquidity'] = start_changing_liquidity
+            result[dir_name]['start_stay_liquidity'] = start_stay_liquidity
+            result[dir_name]['start_remix_liquidity'] = start_remix_liquidity
+            result[dir_name]['start_changing_liquidity_timecutoff'] = start_changing_liquidity_timecutoff
+            result[dir_name]['start_stay_liquidity_timecutoff'] = start_stay_liquidity_timecutoff
+
             changing_liquidity_interval, stay_liquidity_interval, remix_liquidity_interval, changing_liquidity_timecutoff_interval, stay_liquidity_timecutoff_interval = (
-                plot_mix_liquidity(f'{mix_id} {dir_name}', data, (changing_liquidity[-1], stay_liquidity[-1], remix_liquidity[-1], changing_liquidity_timecutoff[-1], stay_liquidity_timecutoff[-1]), time_liquidity, initial_cj_index, plot_ax))
+                plot_mix_liquidity(f'{mix_id} {dir_name}', data, (start_changing_liquidity, start_stay_liquidity, start_remix_liquidity, start_changing_liquidity_timecutoff, start_stay_liquidity_timecutoff), time_liquidity, initial_cj_index, plot_ax))
+            # Extend whole array over all intervals
             changing_liquidity.extend(changing_liquidity_interval)
             stay_liquidity.extend(stay_liquidity_interval)
             remix_liquidity.extend(remix_liquidity_interval)
             changing_liquidity_timecutoff.extend(changing_liquidity_timecutoff_interval)
             stay_liquidity_timecutoff.extend(stay_liquidity_timecutoff_interval)
+            # Save whole interval results for
+            result[dir_name]['interval_changing_liquidity'] = changing_liquidity_interval
+            result[dir_name]['interval_stay_liquidity'] = stay_liquidity_interval
+            result[dir_name]['interval_remix_liquidity'] = remix_liquidity_interval
+            result[dir_name]['interval_changing_liquidity_timecutoff'] = changing_liquidity_timecutoff_interval
+            result[dir_name]['interval_stay_liquidity_timecutoff'] = stay_liquidity_timecutoff_interval
 
             # Add fee rate into the same graph
             PLOT_FEERATE = False
-            if PLOT_FEERATE:
+            if PLOT_FEERATE and ax:
                 ax3 = ax.twinx()
                 ax3.spines['right'].set_position(('outward', -30))  # Adjust position of the third axis
             else:
@@ -677,8 +718,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             mining_fee_rate_interval = plot_mining_fee_rates(f'{mix_id} {dir_name}', data, mining_fee_rates, ax3)
             mining_fee_rate.extend(mining_fee_rate_interval)
 
-            PLOT_NUM_WALLETS = True if plot_only_intervals else False
-            if PLOT_NUM_WALLETS:
+            PLOT_NUM_WALLETS = True if plot_single_intervals else False
+            if PLOT_NUM_WALLETS and ax:
                 ax3 = ax.twinx()
                 ax3.spines['right'].set_position(('outward', -28))  # Adjust position of the third axis
             else:
@@ -687,7 +728,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             num_wallets.extend(num_wallets_interval)
 
             initial_cj_index = initial_cj_index + len(data["coinjoins"])
-            ax.set_title(f'Type of inputs for given cjtx ({"values" if analyze_values else "number"})\n{mix_id} {dir_name}')
+            if ax:
+                ax.set_title(f'Type of inputs for given cjtx ({"values" if analyze_values else "number"})\n{mix_id} {dir_name}')
             logging.info(f'{target_base_path} inputs analyzed')
 
             # Compute liquidity inflows (sum of weeks)
@@ -706,12 +748,15 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 months_dict[month_key][key] = record
 
             # Extend the y-limits to ensure the vertical lines go beyond the plot edges
-            y_range = ax.get_ylim()
-            padding = 0.02 * (y_range[1] - y_range[0])
-            ax.set_ylim(y_range[0] - padding, y_range[1] + padding)
+            if ax:
+                y_range = ax.get_ylim()
+                padding = 0.02 * (y_range[1] - y_range[0])
+                ax.set_ylim(y_range[0] - padding, y_range[1] + padding)
 
             # Save single interval figure
-            if plot_only_intervals:
+            if plot_single_intervals:
+                plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
+
                 restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
                 save_file = os.path.join(target_path, dir_name,
                          f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
@@ -867,57 +912,73 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
             if ax3:
                 ax3.legend()
 
-    if not plot_only_intervals:
-        # Save input_types into json
-        PLOT_PLOTLY = False
-        if PLOT_PLOTLY:
-            plotly_data = {'time': list(range(0, len(input_types[MIX_EVENT_TYPE.MIX_REMIX.name])))}
-            for input_type in input_types.keys():
-                if input_type in [MIX_EVENT_TYPE.MIX_ENTER.name, MIX_EVENT_TYPE.MIX_REMIX_FRIENDS.name, MIX_EVENT_TYPE.MIX_REMIX_FRIENDS_WW1.name, 'MIX_REMIX_1', 'MIX_REMIX_2', 'MIX_REMIX_3-5', 'MIX_REMIX_6-19', 'MIX_REMIX_20+', 'MIX_REMIX_1000-1999', 'MIX_REMIX_2000+', 'MIX_REMIX_nonstd']:
-                    plotly_data[input_type] = [value.item() for value in input_types[input_type]]
-            save_file = os.path.join(target_path, 'plotly_data.json')
-            als.save_json_to_file(save_file, plotly_data)
+    # Save input_types into json for plotly external plotting
+    PLOT_PLOTLY = False
+    if PLOT_PLOTLY:
+        plotly_data = {'time': list(range(0, len(input_types[MIX_EVENT_TYPE.MIX_REMIX.name])))}
+        for input_type in input_types.keys():
+            if input_type in [MIX_EVENT_TYPE.MIX_ENTER.name, MIX_EVENT_TYPE.MIX_REMIX_FRIENDS.name,
+                              MIX_EVENT_TYPE.MIX_REMIX_FRIENDS_WW1.name, 'MIX_REMIX_1', 'MIX_REMIX_2', 'MIX_REMIX_3-5',
+                              'MIX_REMIX_6-19', 'MIX_REMIX_20+', 'MIX_REMIX_1000-1999', 'MIX_REMIX_2000+',
+                              'MIX_REMIX_nonstd']:
+                plotly_data[input_type] = [value.item() for value in input_types[input_type]]
+        save_file = os.path.join(target_path, 'plotly_data.json')
+        als.save_json_to_file(save_file, plotly_data)
 
+    if plot_multi_graphs:
         # Add additional cummulative plots for all coinjoin in one
         ax = fig.add_subplot(NUM_ROWS, NUM_COLUMNS, ax_index, axes_class=AA.Axes)  # Get next subplot
         ax_index += 1
         plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
 
         # Finalize multigraph graph
-        if plot_multigraph:
-            plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
-            restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
-            save_file = os.path.join(target_path, f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
-            plt.savefig(f'{save_file}.png', dpi=300)
-            plt.savefig(f'{save_file}.pdf', dpi=300)
-            # with open(f'{save_file}.html', "w") as f:
-            #     f.write(mpld3.fig_to_html(plt.gcf()))
-        plt.close()
-
-        # Save generate and save cummulative results separately
-        fig = plt.figure(figsize=(10, 3))
-        ax = fig.add_subplot(1, 1, 1, axes_class=AA.Axes)  # Get next subplot
-        plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
-        plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
+        plt.subplots_adjust(bottom=0.1, wspace=0.25, hspace=0.4)
+        plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
         restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
-        save_file = os.path.join(target_path, f'{mix_id}_cummul_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
+        save_file = os.path.join(target_path, f'{mix_id}_input_types_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
         plt.savefig(f'{save_file}.png', dpi=300)
         plt.savefig(f'{save_file}.pdf', dpi=300)
         # with open(f'{save_file}.html', "w") as f:
         #     f.write(mpld3.fig_to_html(plt.gcf()))
         plt.close()
 
-        # save detected transactions with no remixes (potentially false positives)
-        als.save_json_to_file_pretty(os.path.join(target_path, 'no_remix_txs_simplified.json'), no_remix_all)
+        # Save generate and save cummulative results separately
+    if plot_aggregate:
+        fig = plt.figure(figsize=(10, 3))
+        ax = fig.add_subplot(1, 1, 1, axes_class=AA.Axes)  # Get next subplot
+        plot_allcjtxs_cummulative(ax, new_month_indices, changing_liquidity, changing_liquidity_timecutoff, stay_liquidity, remix_liquidity, mining_fee_rate, ['month', 'year'])
+        plt.subplots_adjust(bottom=0.1, wspace=0.15, hspace=0.4)
+        plt.rcParams.update({'font.size': DEFAULT_AXIS_LABEL_SIZE})
+        restrict_size_string = "" if restrict_to_in_size is None else f'{round(restrict_to_in_size[1] / SATS_IN_BTC, 3)}btc'
+        save_file = os.path.join(target_path, f'{mix_id}_cummul_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}')
+        plt.savefig(f'{save_file}.png', dpi=300)
+        plt.savefig(f'{save_file}.pdf', dpi=300)
+        save_file = os.path.join(target_path, f'{mix_id}_cummul_{"values" if analyze_values else "nums"}_{"norm" if normalize_values else "notnorm"}{restrict_size_string}_nolegend')
+        plt.legend().set_visible(False)
+        plt.savefig(f'{save_file}.png', dpi=300)
+        plt.savefig(f'{save_file}.pdf', dpi=300)
+        # with open(f'{save_file}.html', "w") as f:
+        #     f.write(mpld3.fig_to_html(plt.gcf()))
+        plt.close()
+
+    # save detected transactions with no remixes (potentially false positives)
+    als.save_json_to_file_pretty(os.path.join(target_path, 'no_remix_txs_simplified.json'), no_remix_all)
+
+    # store also results over all intervals
+    result['all_changing_liquidity'] = changing_liquidity
+    result['all_stay_liquidity'] = stay_liquidity
+    result['all_remix_liquidity'] = remix_liquidity
+    result['all_changing_liquidity_timecutoff'] = changing_liquidity_timecutoff
+    result['all_stay_liquidity_timecutoff'] = stay_liquidity_timecutoff
+    return result
 
 
-
-def estimate_wallet_prediction_factor(base_path, mix_id):
+def estimate_wallet_prediction_factor(all_data: dict, base_path, mix_id, prediction_matrix: dict=None,
+                                      plot_inputs_prediction: bool=True, plot_outputs_prediction: bool=True, ax_provided=None, do_plot=True):
     # REFACTOR - mixed analysis and plotting
-    AVG_NUM_INPUTS, AVG_NUM_OUTPUTS = als.get_wallets_prediction_ratios(mix_id)
+    AVG_NUM_INPUTS, AVG_NUM_OUTPUTS = als.get_wallets_prediction_ratios(mix_id, prediction_matrix)
 
     target_load_path = os.path.join(base_path, mix_id)
-    all_data = als.load_coinjoins_from_file(target_load_path, None, True)
     sorted_cj_time = als.sort_coinjoins(all_data['coinjoins'], als.SORT_COINJOINS_BY_RELATIVE_ORDER)
 
     if len(sorted_cj_time) < 2:
@@ -935,11 +996,6 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
         x1, y1 = params
         return np.sum(np.abs(x_window / x1 - y_window / y1))
 
-    fig_single, ax = plt.subplots(figsize=(10, 4))  # Figure for single plot
-
-    ratios_list_every_cjtx = [num_all_inputs[offset] / (num_all_outputs[offset] / AVG_NUM_OUTPUTS) for offset in range(0, len(num_all_inputs))]  # Number of wallets in every
-    ax.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
-
     # Store index of coinjoins when it changes months/years
     new_month_indices = []
     next_month_index = 0
@@ -954,6 +1010,8 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
                 new_month_indices.append(('year', next_month_index, f'{dates[i].year}-{dates[i].month:02}'))
         next_month_index = next_month_index + 1
 
+    ratios_list_every_cjtx = [num_all_inputs[offset] / (num_all_outputs[offset] / AVG_NUM_OUTPUTS) for offset in range(0, len(num_all_inputs))]  # Number of wallets in every
+
     ratios_list = []
     WINDOW_LEN = 10
     for offset in range(0, len(num_all_inputs) - WINDOW_LEN):
@@ -967,80 +1025,168 @@ def estimate_wallet_prediction_factor(base_path, mix_id):
         x1_opt, y1_opt = result.x
         AVG_NUM_INPUTS = AVG_NUM_OUTPUTS * (x1_opt / y1_opt)
         ratios_list.append(AVG_NUM_INPUTS)
-    ax.plot(ratios_list, label=f'L1 minimization, window={WINDOW_LEN}', alpha=0.5, color='black')
-    LARGE_AVG_WINDOW = 100
-    ratios_list_avg = als.compute_averages(ratios_list, LARGE_AVG_WINDOW)
-    ax.plot(range(LARGE_AVG_WINDOW, len(ratios_list_avg) + LARGE_AVG_WINDOW), ratios_list_avg,
-             label=f'Average of L1 minimization, window={LARGE_AVG_WINDOW}', color='red', alpha=0.5, linewidth=2)
-    ax.set_xlabel('coinjoin in time')
-    ax.set_ylabel('inputs prediction factor')
-
-    # Plot explict time ticks instead of
-    plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
 
     #
     # Compute number of predicted wallets
-    COLOR_WALLETS_INPUTS = 'green'
-    COLOR_WALLETS_OUTPUTS = 'red'
+    COLOR_WALLETS_INPUTS = 'red'
+    COLOR_WALLETS_OUTPUTS = 'green'
     predicted_wallets_list_inputs = []
+    predicted_wallets_list_inputs_cilo = []
+    predicted_wallets_list_inputs_cihi = []
     predicted_wallets_list_outputs = []
+    predicted_wallets_list_outputs_cilo = []
+    predicted_wallets_list_outputs_cihi = []
     # Select ratios to use
-    #used_prediction_ratios = ratios_list_every_cjtx
     used_prediction_ratios = ratios_list
-    #used_prediction_ratios = ratios_list_avg
+
+    LARGE_AVG_WINDOW = 100
+    ratios_list_avg = als.smooth_interval(ratios_list, LARGE_AVG_WINDOW)
 
     last_usable_factor = used_prediction_ratios[0]
-    for i in range(0, len(sorted_cj_time)):
-        # Use computed prediction factor if available
-        if list_get(used_prediction_ratios, i, -1) != -1:
-            predicted_num_wallets = int(round(num_all_inputs[i] / used_prediction_ratios[i]))
-            last_usable_factor = ratios_list[i]
-        else:
-            # Last last known if factor no longer computed (due to size of average window)
-            predicted_num_wallets = int(round(num_all_inputs[i] / last_usable_factor))
-        predicted_wallets_list_inputs.append(predicted_num_wallets)
-        predicted_wallets_list_outputs.append(int(round(num_all_outputs[i] / AVG_NUM_OUTPUTS)))
+    if prediction_matrix:
+        for i in range(0, len(sorted_cj_time)):
+            num_inputs = len(all_data['coinjoins'][sorted_cj_time[i]['txid']]['inputs'].keys())
+            predicted_wallets_list_inputs.append(prediction_matrix['inputs'][str(num_inputs)]['N_hat'])
+            predicted_wallets_list_inputs_cilo.append(prediction_matrix['inputs'][str(num_inputs)]['ci_lo'])
+            predicted_wallets_list_inputs_cihi.append(prediction_matrix['inputs'][str(num_inputs)]['ci_hi'])
+
+            num_outputs = len(all_data['coinjoins'][sorted_cj_time[i]['txid']]['outputs'].keys())
+            predicted_wallets_list_outputs.append(prediction_matrix['outputs'][str(num_outputs)]['N_hat'])
+            predicted_wallets_list_outputs_cilo.append(prediction_matrix['outputs'][str(num_outputs)]['ci_lo'])
+            predicted_wallets_list_outputs_cihi.append(prediction_matrix['outputs'][str(num_outputs)]['ci_hi'])
+    else:
+        for i in range(0, len(sorted_cj_time)):
+            # Use computed prediction factor if available
+            if list_get(used_prediction_ratios, i, -1) != -1:
+                predicted_num_wallets = int(round(num_all_inputs[i] / used_prediction_ratios[i]))
+                last_usable_factor = ratios_list[i]
+            else:
+                # Last last known if factor no longer computed (due to size of average window)
+                predicted_num_wallets = int(round(num_all_inputs[i] / last_usable_factor))
+            predicted_wallets_list_inputs.append(predicted_num_wallets)
+            predicted_wallets_list_outputs.append(int(round(num_all_outputs[i] / AVG_NUM_OUTPUTS)))
+
+    # Compute averages
+    predicted_wallets_inputs_avg = als.smooth_interval(predicted_wallets_list_inputs, LARGE_AVG_WINDOW)
+    predicted_wallets_inputs_cilo_avg = als.smooth_interval(predicted_wallets_list_inputs_cilo, LARGE_AVG_WINDOW) if predicted_wallets_list_inputs_cilo else None
+    predicted_wallets_inputs_cihi_avg = als.smooth_interval(predicted_wallets_list_inputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_inputs_cihi else None
+    predicted_wallets_outputs_avg = als.smooth_interval(predicted_wallets_list_outputs, LARGE_AVG_WINDOW)
+    predicted_wallets_outputs_cilo_avg = als.smooth_interval(predicted_wallets_list_outputs_cilo, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cilo else None
+    predicted_wallets_outputs_cihi_avg = als.smooth_interval(predicted_wallets_list_outputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cihi else None
+
+    if ax_provided == None:
+        fig_single, ax = plt.subplots(figsize=(16, 4))  # Figure for single plot
+    else:
+        ax = ax_provided
+    # Plot explict time ticks instead of default ones
+    plot_month_year_separators(new_month_indices, ['month', 'year'], ax)
+    ax.set_xlabel('coinjoin in time')
+    plt.xticks(fontsize=DEFAULT_AXIS_LABEL_SIZE)
 
     PLOT_NUM_WALLETS = True
-    if PLOT_NUM_WALLETS:
-        predicted_wallets_inputs_avg = als.compute_averages(predicted_wallets_list_inputs, LARGE_AVG_WINDOW)
-        predicted_wallets_outputs_avg = als.compute_averages(predicted_wallets_list_outputs, LARGE_AVG_WINDOW)
+    FULL_LEGEND = False
+    if PLOT_NUM_WALLETS and do_plot:
+        if plot_inputs_prediction:
+            ax.plot(predicted_wallets_list_inputs,
+                     label='Predicted # wallets (inputs)' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_inputs_avg,
+                     label=f'Average predicted # wallets (inputs), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
+            if predicted_wallets_inputs_cilo_avg:
+                # ax.fill_between(range(LARGE_AVG_WINDOW, len(predicted_wallets_inputs_cilo_avg) + LARGE_AVG_WINDOW), predicted_wallets_inputs_cilo_avg, predicted_wallets_inputs_cihi_avg, alpha=0.3, color=COLOR_WALLETS_INPUTS)
+                ax.plot(predicted_wallets_inputs_cilo_avg,
+                         label=f'Average predicted # wallets (inputs, CI lo), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_INPUTS, alpha=0.3, linewidth=1, linestyle=':')
+                ax.plot(predicted_wallets_inputs_cihi_avg,
+                         label=f'Average predicted # wallets (inputs, CI hi), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_INPUTS, alpha=0.3, linewidth=1, linestyle=':')
+
+            # Artificial entry with same settings to have legend complete on ax
+            ax.plot(predicted_wallets_list_inputs[0], label=f'Predicted # wallets (inputs, every coinjoin)',
+                    color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_inputs_avg[0],
+                     label=f'Average predicted # wallets (inputs, window={LARGE_AVG_WINDOW})', color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
+
+        if plot_outputs_prediction:
+            ax.plot(predicted_wallets_list_outputs,
+                     label=f'Predicted # wallets (outputs)' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_OUTPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_outputs_avg,
+                     label=f'Average predicted # wallets (outputs), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                    color=COLOR_WALLETS_OUTPUTS, alpha=0.7, linewidth=1)
+            if predicted_wallets_outputs_cilo_avg:
+                # ax.fill_between(range(LARGE_AVG_WINDOW, len(predicted_wallets_outputs_cilo_avg) + LARGE_AVG_WINDOW), predicted_wallets_outputs_cihi_avg, predicted_wallets_outputs_cilo_avg, color=COLOR_WALLETS_OUTPUTS, alpha=0.3)
+                ax.plot(predicted_wallets_outputs_cilo_avg,
+                         label=f'Average predicted # wallets (outputs, CI lo), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_OUTPUTS, alpha=0.3, linewidth=1, linestyle=':')
+                ax.plot(predicted_wallets_outputs_cihi_avg,
+                         label=f'Average predicted # wallets (outputs, CI hi), window={LARGE_AVG_WINDOW}' if FULL_LEGEND else '_nolegend_',
+                        color=COLOR_WALLETS_OUTPUTS, alpha=0.3, linewidth=1, linestyle=':')
+
+            # Artificial entry with same settings to have legend complete on ax
+            ax.plot(predicted_wallets_list_outputs[0], label=f'Predicted # wallets (outputs, every coinjoin)',
+                    color=COLOR_WALLETS_OUTPUTS, alpha=0.1, linewidth=1)
+            ax.plot(predicted_wallets_outputs_avg[0],
+                     label=f'Average predicted # wallets (outputs, window={LARGE_AVG_WINDOW})', color=COLOR_WALLETS_OUTPUTS, alpha=0.7, linewidth=1)
+
+        if predicted_wallets_inputs_cilo_avg:
+            # ax.fill_between(range(LARGE_AVG_WINDOW, len(predicted_wallets_inputs_cilo_avg) + LARGE_AVG_WINDOW), predicted_wallets_inputs_cilo_avg, predicted_wallets_inputs_cihi_avg, alpha=0.3, color=COLOR_WALLETS_INPUTS)
+            ax.plot(predicted_wallets_inputs_cilo_avg[0],
+                     label=f'Confidence interval 5% - 95%',
+                    color='gray', alpha=0.3, linewidth=1, linestyle=':')
+
+        ax.yaxis.set_label_position("right")
+        ax.yaxis.tick_right()
+        ax.set_ylabel('number of predicted wallets')
+        #ax.tick_params(axis='y', colors=COLOR_WALLETS_INPUTS)
+
+
+    PLOT_INPUTS2OUTPUTS_FACTOR = False
+    if PLOT_INPUTS2OUTPUTS_FACTOR and do_plot:
         ax2 = ax.twinx()
-        ax2.plot(predicted_wallets_list_inputs,
-                 label=f'Predicted # wallets (inputs)', color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
-        ax2.plot(predicted_wallets_inputs_avg,
-                 label=f'Average predicted # wallets (inputs), window={LARGE_AVG_WINDOW}', color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
-        # Artificial entry with same settings to have legend complete on ax
-        ax.plot(predicted_wallets_list_inputs[0], label=f'Predicted # wallets (inputs)', color=COLOR_WALLETS_INPUTS, alpha=0.1, linewidth=1)
-        ax.plot(predicted_wallets_inputs_avg[0],
-                 label=f'Average predicted # wallets, window={LARGE_AVG_WINDOW}', color=COLOR_WALLETS_INPUTS, alpha=0.7, linewidth=1)
 
-        ax2.set_ylabel('number of wallets', color=COLOR_WALLETS_INPUTS)
-        ax2.tick_params(axis='y', colors=COLOR_WALLETS_INPUTS)
+        ax2.plot(ratios_list_every_cjtx, label=f'Inputs/outputs-based factor (every coinjoin)', alpha=0.3, color='black')
+        ax2.plot(ratios_list, label=f'L1 minimization, window={WINDOW_LEN}', alpha=0.5, color='black')
+        ax2.plot(range(LARGE_AVG_WINDOW, len(ratios_list_avg) + LARGE_AVG_WINDOW), ratios_list_avg,
+             label=f'Average of L1 minimization, window={LARGE_AVG_WINDOW}', color='red', alpha=0.5, linewidth=2)
+        ax2.set_ylabel('inputs prediction factor')
+        ax2.yaxis.set_label_position("left")
+        ax2.yaxis.tick_left()
 
+    save_path = os.path.join(target_load_path, f'{mix_id}_wallets_predictions_dynamics')
     # Finalize graph
-    plt.subplots_adjust(bottom=0.15)
-    ax.set_title(f'Wallets prediction factor variability: {mix_id}')
-    ax.legend(loc='upper left')
-    save_path = os.path.join(target_load_path, f'{mix_id}_inputs_prediction_factor_dynamics')
-    plt.savefig(f'{save_path}.png', dpi=300)
-    plt.savefig(f'{save_path}.pdf', dpi=300)
-    logging.info(f'estimate_wallet_prediction_factor() saved into {save_path}.png')
-    #plt.show()
-    plt.close()
+    if do_plot:
+        plt.subplots_adjust(bottom=0.15)
+        ax.set_title(f'Number of predicted participating wallets: {mix_id}')
+        ax.legend(loc='upper left')
+        plt.savefig(f'{save_path}.png', dpi=300)
+        plt.savefig(f'{save_path}.pdf', dpi=300)
+        logging.info(f'estimate_wallet_prediction_factor() saved into {save_path}.png')
+    else:
+        logging.info(f'No plotting requested')
 
-    predicted_wallets = []
+    if ax_provided is None:
+        plt.close()
+
+    predicted_wallets = {}
     last_usable_factor = used_prediction_ratios[len(used_prediction_ratios) - 1]
     for i in range(0, len(sorted_cj_time)):
-        predicted_wallets.append({'txid': sorted_cj_time[i]['txid'],
-                                  'num_wallets': predicted_wallets_list_inputs[i],
+        predicted_wallets[sorted_cj_time[i]['txid']] = {'txid': sorted_cj_time[i]['txid'],
+                                  'num_wallets': predicted_wallets_list_outputs[i],
+                                  'num_wallets_by_inputs': predicted_wallets_list_inputs[i],
+                                  'num_wallets_by_inputs_cilo': predicted_wallets_list_inputs_cilo[i] if predicted_wallets_list_inputs_cilo else None,
+                                  'num_wallets_by_inputs_cihi': predicted_wallets_list_inputs_cihi[i] if predicted_wallets_list_inputs_cihi else None,
+                                  'num_wallets_by_outputs': predicted_wallets_list_outputs[i],
+                                  'num_wallets_by_outputs_cilo': predicted_wallets_list_outputs_cilo[i] if predicted_wallets_list_outputs_cilo else None,
+                                  'num_wallets_by_outputs_cihi': predicted_wallets_list_outputs_cihi[i] if predicted_wallets_list_outputs_cihi else None,
                                   'separate_ctx_input_factor': list_get(ratios_list_every_cjtx, i, -1),
                                   f'L1_{WINDOW_LEN}_input_factor': list_get(ratios_list, i, last_usable_factor),
                                   f'L1_{WINDOW_LEN}_avg_{LARGE_AVG_WINDOW}_input_factor': list_get(ratios_list_avg, i, last_usable_factor)
-                                  })
+                                  }
     als.save_json_to_file_pretty(f'{save_path}.json', {'mix_id':mix_id, 'predictions': predicted_wallets})
 
-    return ratios_list
+    return predicted_wallets, predicted_wallets_inputs_avg, predicted_wallets_outputs_avg
 
 
 def plot_flows_steamgraph(flow_in_year: dict, title: str):
@@ -1321,7 +1467,7 @@ def plot_inputs_type_ratio(mix_id: str, data: dict, initial_cj_index: int, ax, a
         if analyze_values and normalize_values:
             ax.set_ylabel('Fraction of inputs values')
         if analyze_values and not normalize_values:
-            ax.set_ylabel('Inputs values (btc)')
+            ax.set_ylabel('Inputs values (btc)', fontsize=DEFAULT_AXIS_LABEL_SIZE)
         if not analyze_values and normalize_values:
             ax.set_ylabel('Fraction of input numbers')
         if not analyze_values and not normalize_values:
@@ -1454,7 +1600,7 @@ def plot_mix_liquidity(mix_id: str, data: dict, initial_liquidity, time_liquidit
         if PLOT_LEAVE_TIMECUTOFF:
             ax.plot(liquidity_timecutoff_btc, color='blue', alpha=0.6, linestyle='--')
 
-        ax.set_ylabel('btc in mix', color='royalblue')
+        ax.set_ylabel('btc in mix', color='royalblue', fontsize=DEFAULT_AXIS_LABEL_SIZE)
         ax.tick_params(axis='y', colors='royalblue')
 
     return cjtx_cummulative_liquidity, stay_liquidity, remix_liquidity, cjtx_cummulative_liquidity_timecutoff, stay_liquidity_timecutoff
@@ -1591,7 +1737,7 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
     """
 
     def fmt_btc(x):
-        s = f"{float(x):.8f}".rstrip('0').rstrip('.')
+        s = f"{float(x):.2f}".rstrip('0').rstrip('.')
         return s
 
     def safe(x):
@@ -1650,7 +1796,7 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
             ("Staying outputs / total outputs", data.get("ratio_staying_outputs_2_total_outputs")),
             ("Staying / non-remix outputs", data.get("ratio_staying_outputs_2_nonremix_outputs")),
             ("Remixed inputs / total (numbers)", data.get("ratio_remixed_inputs_2_total_inputs_numbers")),
-            ("Remixed inputs / total (values)", data.get("ratio_remixed_inputs_2_total_inputs_values")),
+            ("Remixed inputs / total (values, BTC)", data.get("ratio_remixed_inputs_2_total_inputs_values")),
         ]
 
         period = ""
@@ -1701,18 +1847,18 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
 
         totals = []
         if total_fresh_inputs_value is not None:
-            totals.append(build_kv("Fresh inputs (BTC)", fmt_btc(total_fresh_inputs_value)))
+            totals.append(build_kv("Fresh inflows (BTC)", fmt_btc(total_fresh_inputs_value)))
         if total_friends_inputs_value is not None:
-            totals.append(build_kv("Friends inputs (BTC)", fmt_btc(total_friends_inputs_value)))
+            if total_fresh_inputs_without_nonstandard_outputs_value is not None:
+                totals.append(build_kv("Fresh inflows without nonstandard (BTC)",
+                                       fmt_btc(total_fresh_inputs_without_nonstandard_outputs_value)))
+            totals.append(build_kv("WW1/WW2 mix inflows (BTC)", fmt_btc(total_friends_inputs_value)))
         if total_unmoved_outputs_value is not None:
             totals.append(build_kv("Unmoved outputs (BTC)", fmt_btc(total_unmoved_outputs_value)))
         if total_leaving_outputs_value is not None:
             totals.append(build_kv("Leaving outputs (BTC)", fmt_btc(total_leaving_outputs_value)))
         if total_nonstandard_leaving_outputs_value is not None:
-            totals.append(build_kv("Nonstandard leaving (BTC)", fmt_btc(total_nonstandard_leaving_outputs_value)))
-        if total_fresh_inputs_without_nonstandard_outputs_value is not None:
-            totals.append(build_kv("Fresh inputs w/o nonstandard (BTC)",
-                                   fmt_btc(total_fresh_inputs_without_nonstandard_outputs_value)))
+            totals.append(build_kv("Nonstandard outputs leaving (BTC)", fmt_btc(total_nonstandard_leaving_outputs_value)))
 
         totals_card = build_card("Aggregate Values", totals) if totals else ""
 
@@ -1748,11 +1894,6 @@ def generate_liquidity_summary_html(coords: list, target_path: str):
         .cjseg .io-col .under { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
 
         .cjseg .foot { margin-top: 8px; color: var(--muted); font-size: 0.85rem; }
-        @media (prefers-color-scheme: dark) {
-          .cjseg { --fg:#e5e7eb; --bg:#0b0b0b; --muted:#9aa0a6; --line:#2a2a2a; --accent:#e5e7eb; }
-          .cjseg .card { background: #121212; }
-          .cjseg .io-col { background: #121212; }
-        }
         </style>
         '''
 
@@ -1790,14 +1931,16 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
 
         # Plot
         plt.figure(figsize=(10, 5))
-        plt.plot(df["broadcast_time"], df["out_ratio"], label="outputs", alpha=0.3)
-        plt.plot(df["broadcast_time"], df["in_ratio"], label="inputs", alpha=0.7)
-        plt.axhline(0.4, color="gray", linestyle="--", linewidth=1, label="threshold (0.4)")
+        plt.plot(df["broadcast_time"], df["out_ratio"] * 100, label="outputs (same coordinator)", color='green', alpha=0.2)
+        plt.plot(df["broadcast_time"], df["in_ratio"] * 100, label="inputs (same coordinator)", color='green', alpha=0.7)
+        plt.plot(df["broadcast_time"], df["out_ratio_second"] * 100, label="outputs (second coordinator)", color='red', alpha=0.2)
+        plt.plot(df["broadcast_time"], df["in_ratio_second"] * 100, label="inputs (second coordinator)", color='red', alpha=0.7)
+        plt.axhline(40, color="gray", linestyle="--", linewidth=1, label="threshold (40%)")
         ax = plt.gca()
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
         plt.xticks(rotation=30, ha="right")
-        plt.ylabel("ratio")
+        plt.ylabel("% remix fraction")
         plt.title(f"'{coordinator}': intermixed ratio of inputs & outputs over time")
         plt.legend()
         plt.tight_layout()
@@ -1830,21 +1973,21 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
         in_positions = [bp - offset for bp in base_positions]
         out_positions = [bp + offset for bp in base_positions]
 
-        plt.figure(figsize=(max(8, M * 0.9), 5))
+        plt.figure(figsize=(max(8, M * 0.9), 3))
 
-        bp_in = plt.boxplot(in_series, positions=in_positions, widths=0.25, patch_artist=True, showfliers=False)
+        bp_in = plt.boxplot(in_series, whis=(5,95), positions=in_positions, widths=0.25, patch_artist=True, showfliers=False)
         for patch in bp_in["boxes"]:
             patch.set(facecolor="#f28e2b")
         for element in ["whiskers", "caps", "medians"]:
             for line in bp_in[element]:
                 line.set(color="#6b6b6b", linewidth=1.2)
 
-        bp_out = plt.boxplot(out_series, positions=out_positions, widths=0.25, patch_artist=True, showfliers=False)
+        bp_out = plt.boxplot(out_series, whis=(5,95), positions=out_positions, widths=0.25, patch_artist=True, showfliers=False)
         for patch in bp_out["boxes"]:
             patch.set(facecolor="#4e79a7")
 
         # Rotate labels 45 degrees
-        plt.xticks(base_positions, coordinators, rotation=45, ha="right")
+        plt.xticks(base_positions, coordinators, rotation=15, ha="right")
 
         for element in ["whiskers", "caps", "medians"]:
             for line in bp_out[element]:
@@ -1863,3 +2006,306 @@ def plot_intermix_ratios(intercoord_ratios: dict, target_path: str | Path, prefi
         plt.tight_layout()
         plt.savefig(Path(target_path, f"{prefix}all_coordinators_in_out_boxplot.png"), dpi=200, bbox_inches="tight")
         plt.close()
+
+
+def plot_coord_attribution_stats(main_coordinator: str, num_true_coord_txs: int, results: dict, target_path: str | Path, fp_string: str, fn_string: str, filename: str):
+    def _to_float_or_die(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"Non-numeric key in results: {v!r}")
+
+    # Build (numeric_value, original_key) pairs and sort by the numeric value
+    _key_pairs = sorted(((_to_float_or_die(k), k) for k in results.keys()),
+                        key=lambda t: t[0])
+
+    # Use numeric values for the x-axis
+    x_vals = [num for num, _orig in _key_pairs]
+
+    # Use the original (unmodified) key to access the dict
+    first_original_key = _key_pairs[0][1]
+    coordinators = sorted(results[first_original_key].keys())
+
+    # Build series dict: {coordinator: {"fp": [...], "fn": [...]}} aligned to x_vals
+    series = {c: {fp_string: [], fn_string: []} for c in coordinators}
+
+    for num, _orig in _key_pairs:
+        x_str = _orig
+        for c in coordinators:
+            # Remove offset given by very first value where 0% changes were applied
+            REMOVE_OFFSET = False
+            if REMOVE_OFFSET:
+                fp_offset = results["0"][c][fp_string][0]
+                fn_offset = results["0"][c][fn_string][0]
+
+            # Values are lists (single-element), extract safely with defaults
+            entry = results[x_str].get(c, {})
+            fp_list = entry.get(fp_string, [0])
+            fn_list = entry.get(fn_string, [0])
+            if REMOVE_OFFSET:
+                fp_list = [v - fp_offset for v in fp_list]  # Remove potential offset from "no change" ("0") results
+                fn_list = [v - fn_offset for v in fn_list]  # Remove potential offset from "no change" ("0") results
+
+            fp_val = np.average(fp_list) if isinstance(fp_list, list) and fp_list else 0
+            fn_val = np.average(fn_list) if isinstance(fn_list, list) and fn_list else 0
+            series[c][fp_string].append(fp_val)
+            series[c][fn_string].append(fn_val)
+
+    # Plot
+    plt.figure(figsize=(12, 7))
+    for c in coordinators:
+        # Solid for fp, dashed for fn, same color cycle by plotting and grabbing the color
+        # First plot fp and capture color from the created line
+        fp_line, = plt.plot(x_vals, series[c][fp_string], label=f"{c} {fp_string}")
+        # Use the same color for fn with dashed linestyle
+        plt.plot(x_vals, series[c][fn_string], linestyle="--", label=f"{c} {fn_string}", color=fp_line.get_color(), alpha=0.7)
+        # Use the same color for fn with dashed linestyle
+        plt.plot(x_vals, series['unattributed'][fp_string], linestyle="--", label=f"unattributed", color='gray', alpha=0.5, linewidth=3)
+
+    plt.xlabel("Removed attributions (%)")
+    plt.ylabel("Count (#) or ratio (%)")
+    plt.title(f"Coordinator '{main_coordinator}' ({num_true_coord_txs} txs) FP (solid) and FN (dashed) over % of removed attributions")
+    plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+    plt.legend(ncol=2, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(Path(target_path, filename), dpi=200, bbox_inches="tight")
+    plt.close()
+
+    return series, x_vals
+
+
+def plot_coord_attribution_stats_aggregated(target_path: Path | str, filename: str, label_str: str, omitt_coords: list,
+                                            log_scale: bool, join_coord_results: bool=False):
+    file_path = os.path.join(target_path, f'{filename}.json')
+    results = als.load_json_from_file(file_path)
+    fp_string = 'fp'
+    fn_string = 'fn'
+
+    assert len(results) == 1, f'Too many top-level keys detected'  # Expect only 1 threshold key
+    for threshold in results:
+        series_aggregated = {coord: {} for coord in results[threshold]}
+
+        # Option 1: drop random single / drop tail single  results[threshold][coord] contains different results to use
+        for coord in results[threshold]:
+            series, x_vals = plot_coord_attribution_stats(coord, 0, results[threshold][coord], target_path,
+                                                                fp_string, fn_string,
+                                                                f"{coord}_coord_discovery_analysis_nominal.png")
+            series_aggregated[coord] = {
+                # fp_string - all but 'unattributed' coordinator
+                fp_string: [sum(vals) for vals in zip(*(series[c][fp_string] for c in series
+                                                        if c != 'unattributed'))],
+                # Only this coordinator for FN
+                fn_string: series[coord][fn_string] if join_coord_results else [-x for x in series[coord][fn_string]],
+                'unattributed': series['unattributed'][fp_string],
+            }
+
+
+        if join_coord_results:
+            # Option 2: drop random any, series_aggregated[coord] contains same type of results as others
+            # (random selection of any coordinator's tx to drop) => aggregate results for even less noise
+            if 'unattributed' in series_aggregated:
+                num_coords = len(series_aggregated) - 1
+            else:
+                num_coords = len(series_aggregated)
+
+            series_aggregated_all = {'aggregated': {
+                    fp_string: [sum(vals)/num_coords for vals in zip(*(series_aggregated[c][fp_string]
+                                                                       for c in series_aggregated
+                                                                       if c != 'unattributed'))],
+                    fn_string: [sum(vals)/num_coords for vals in zip(*(series_aggregated[c][fn_string]
+                                                                       for c in series_aggregated))],
+                    'unattributed': [int(sum(vals)/num_coords) for vals in zip(*(series_aggregated[c]['unattributed']
+                                                                            for c in series_aggregated))],
+                }
+            }
+            series_aggregated = series_aggregated_all
+
+        def plot_symlog(x_vals: list, series_aggregated: dict, join_coord_results: bool, omitt_coords: list):
+            plt.figure(figsize=(10, 5))
+            plt.rcParams.update({'font.size': 14})  # Set global font size
+            if join_coord_results:
+                fp_line, = plt.plot(x_vals, series_aggregated['aggregated'][fp_string], linestyle="-.",
+                                    label=f"false positives (all)", alpha=0.7, linewidth=2)
+                plt.plot(x_vals, series_aggregated['aggregated'][fn_string], linestyle="--",
+                         label=f"false negatives (all)", alpha=0.7, linewidth=2)
+                plt.plot(x_vals, series_aggregated['aggregated']['unattributed'], linestyle='-',
+                         label=f"unattributed (all)",
+                         color='gray', alpha=0.5,
+                         linewidth=5)
+            else:
+                plt.plot([0], [0], linestyle='-.', color='gray', label=f'(false positive)', alpha=0.7, linewidth=2)
+                plt.plot([0], [0], linestyle='--', color='gray', label=f'(false negative)', alpha=0.7, linewidth=2)
+                for coord in sorted(series_aggregated.keys()):
+                    if coord not in omitt_coords:
+                        fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                                            label='_nolegend_', alpha=0.7, linewidth=2)
+                        plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label='_nolegend_',
+                                 color=fp_line.get_color(),
+                                 alpha=0.7, linewidth=2)
+                        # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
+                        #          color=fp_line.get_color(), alpha=0.5,
+                        #          linewidth=3)
+
+                        # Fake plot to fill legend
+                        plt.plot([0], [0], linestyle='-', color=fp_line.get_color(), label=f'{coord}')
+
+            plt.xlabel("Removed attributions (%)")
+            plt.ylabel(f"Number of transactions {'(log scale)' if log_scale else ''}")
+            plt.title(f"Misattributed transactions after removed attributions ({label_str})")
+            plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+            plt.legend(handlelength=2, handletextpad=0.8, ncol=2, fontsize=10)
+
+            if log_scale:
+                plt.yscale('log' if join_coord_results else 'symlog')
+
+                # Symmetric log
+                def symlog_mag_formatter(y, pos):
+                    if y == 0:
+                        return "0"
+                    # show |y| and an arrow for direction
+                    magnitude = abs(y)
+                    # Compact formatting for large/small values: switch to scientific if needed
+                    if magnitude >= 100000 or magnitude < 1e-2:
+                        text = f"{magnitude:.0e}"
+                    else:
+                        # trim trailing zeros
+                        text = f"{magnitude:g}"
+                    # return f"{text} ↑" if y > 0 else f"{text} ↓"
+                    if magnitude == 1:
+                        return ""
+                    else:
+                        return f"{text}" if y > 0 else f"{text}"
+
+                plt.gca().yaxis.set_major_formatter(FuncFormatter(symlog_mag_formatter))
+
+            plt.tight_layout()
+            plt.savefig(Path(target_path, f'{filename}_aggregated.png'), dpi=200, bbox_inches="tight")
+            plt.close()
+
+
+        def plot_singleaxis(x_vals: list, series_aggregated: dict, join_coord_results: bool, omitt_coords: list):
+            plt.figure(figsize=(10, 5))
+            plt.rcParams.update({'font.size': 14})  # Set global font size
+            if join_coord_results:
+                fp_line, = plt.plot(x_vals, series_aggregated['aggregated'][fp_string], linestyle="-.",
+                                    label=f"false positives (all)", alpha=0.7, linewidth=3)
+                plt.plot(x_vals, series_aggregated['aggregated'][fn_string], linestyle="--",
+                                    label=f"false negatives (all)", alpha=0.7, linewidth=3)
+                plt.plot(x_vals, series_aggregated['aggregated']['unattributed'], linestyle='-',
+                         label=f"unattributed (all)",
+                         color='gray', alpha=0.5,
+                         linewidth=5)
+            else:
+                plt.plot([0], [0], linestyle='-.', color='gray', label=f'(false positive)', alpha=0.7, linewidth=2)
+                plt.plot([0], [0], linestyle='--', color='gray', label=f'(false negative)', alpha=0.7, linewidth=2)
+                for coord in sorted(series_aggregated.keys()):
+                    if coord not in omitt_coords:
+                        fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                                            label='_nolegend_', alpha=0.7, linewidth=2)
+                        # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                        #                     label=f"{coord} (misattributed)", alpha=1, linewidth=3)
+                        # fp_line, = plt.plot(x_vals, series_aggregated[coord][fp_string], linestyle="-.",
+                        #                     label=f"{coord} (false positives)", alpha=0.7, linewidth=3)
+                        plt.plot(x_vals, series_aggregated[coord][fn_string], linestyle="--", label='_nolegend_',
+                                 color=fp_line.get_color(),
+                                 alpha=0.7, linewidth=2)
+                        # plt.plot(x_vals, series_aggregated[coord]['unattributed'], linestyle='-', label=f"{coord} (unattributed)",
+                        #          color=fp_line.get_color(), alpha=0.5,
+                        #          linewidth=3)
+
+                        # Fake plot to fill legend
+                        plt.plot([0], [0], linestyle='-', color=fp_line.get_color(), label=f'{coord}')
+
+            plt.xlabel("Removed attributions (%)")
+            plt.ylabel(f"Number of transactions {'(log scale)' if log_scale else ''}")
+            plt.title(f"Misattributed transactions after removed attributions ({label_str})")
+            plt.grid(True, which="both", linestyle=":", linewidth=0.5)
+            plt.legend(handlelength=4, handletextpad=0.8, ncol=1)
+            if log_scale:
+                plt.yscale('log' if join_coord_results else 'symlog')
+
+                ymax = plt.gca().get_ylim()[1]
+                max_pow = int(np.floor(np.log10(ymax)))
+                major_ticks = [10 ** k for k in range(1, max_pow + 1)]  # 10, 100, ...
+
+                plt.gca().yaxis.set_major_locator(FixedLocator(major_ticks))
+                plt.gca().yaxis.set_minor_locator(LogLocator(base=10, subs=range(2, 10)))
+                plt.gca().yaxis.set_minor_formatter(NullFormatter())
+
+            plt.gca().yaxis.set_major_formatter(ScalarFormatter())
+            plt.ticklabel_format(style='plain', axis='y')
+            plt.tight_layout()
+            plt.savefig(Path(target_path, f'{filename}_aggregated.png'), dpi=200, bbox_inches="tight")
+            plt.close()
+
+        if join_coord_results:
+            plot_singleaxis(x_vals, series_aggregated, join_coord_results, omitt_coords)
+        else:
+            plot_symlog(x_vals, series_aggregated, join_coord_results, omitt_coords)
+
+
+def plot_mapping_datasets_stats(cjtxs: dict, mappings: dict, dataset_names: list, target_path: str | Path):
+    # Plot number of transactions per day from different datasets
+    crawl_coord_txs = {txid: None for dataset, txs in mappings.items() if dataset in dataset_names for txid in txs}
+
+    datasets_dates = {}
+    for dataset_name in dataset_names:
+        datasets_dates[dataset_name] = {txid: cjtxs['coinjoins'][txid]['broadcast_time']
+                                        for txid in mappings[dataset_name].keys()}
+    datasets_dates['all'] = {txid: cjtxs['coinjoins'][txid]['broadcast_time']
+                                    for txid in cjtxs['coinjoins'].keys()}
+    datasets_dates['unattributed'] = {txid: cjtxs['coinjoins'][txid]['broadcast_time']
+                                    for txid in cjtxs['coinjoins'].keys() if txid not in crawl_coord_txs}
+
+    als.save_json_to_file_pretty(os.path.join(target_path, 'coordinator_attribution_dataset.json'), datasets_dates)
+
+    # --- aggregate to daily counts per dataset ---
+    def daily_counts_from_datasets(ds_dates, tz_localize=None, tz_convert=None) -> pd.DataFrame:
+        series_dict = {}
+        for name, d in ds_dates.items():
+            idx = pd.to_datetime(list(d.values()))
+            if tz_localize:
+                idx = pd.DatetimeIndex(idx).tz_localize(tz_localize)
+            if tz_convert:
+                idx = pd.DatetimeIndex(idx).tz_convert(tz_convert)
+
+            s = pd.Series(1, index=idx).sort_index()
+            s = s.groupby(s.index.normalize()).size()
+            series_dict[name] = s
+
+        all_dates = pd.date_range(
+            start=min(s.index.min() for s in series_dict.values()),
+            end=max(s.index.max() for s in series_dict.values()),
+            freq="D",
+        )
+
+        df = pd.DataFrame(index=all_dates)
+        for name, s in series_dict.items():
+            df[name] = s.reindex(all_dates, fill_value=0).astype(int)
+        return df
+
+    # If your timestamps are UTC but you want Europe/Prague day boundaries:
+    # df = daily_counts_from_datasets(datasets_dates, tz_localize="UTC", tz_convert="Europe/Prague")
+    df = daily_counts_from_datasets(datasets_dates)
+
+    # --- plot (matplotlib) ---
+    plt.figure(figsize=(10, 5))
+    for col in df.columns:
+        if col == 'unattributed':
+            plt.fill_between(df.index, df[col], alpha=0.4, label=col, color='red')
+            plt.plot(df.index, df[col], linewidth=1.0, alpha=0.9, label="_nolegend_", color='red')
+        elif col == 'all':
+            plt.plot(df.index, df[col], label=f'all: dumplings + crawl_*', alpha=0.3, linewidth=3, color='gray')
+        else:
+            plt.fill_between(df.index, df[col], alpha=0.1, label="_nolegend_")
+            plt.plot(df.index, df[col], label=f'dataset: {col}', alpha=0.9, linestyle="-.")
+
+    plt.title("Daily coinjoin transactions attributed by different ground-truth datasets (post-zkSNACKs)")
+    #plt.xlabel("Date")
+    plt.ylabel("Coinjoins per day")
+    plt.legend(loc="upper right", fontsize=14)
+    plt.grid(True, linewidth=0.5, alpha=0.4)
+    plt.tight_layout()
+    plt.savefig(os.path.join(target_path, 'crawl_datasets.png'), dpi=200, bbox_inches="tight")
+    print(f'Saving {target_path}')
+    plt.close()

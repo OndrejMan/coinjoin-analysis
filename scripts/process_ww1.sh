@@ -16,7 +16,7 @@ done
 curl -sSL "https://mempool.space/api/v1/mining/blocks/fee-rates/all" > $TMP_DIR/Scanner/wasabi1/fee_rates.json
 
 # Run false positives detection
-python3 -m cj_process.parse_dumplings --cjtype ww1 --action detect_false_positives --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+python3 -m cj_process.parse_dumplings --cjtype ww1 --action detect_false_positives --env_vars "MIX_IDS=['wasabi1']" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
 
 # Run coordinators detection - NO COORDINATION DETECTION SO FAR FOR WW1!
 #for dir in wasabi1; do
@@ -34,6 +34,8 @@ for dir in zksnacks mystery others; do
     cp $TMP_DIR/Scanner/wasabi1/false_cjtxs.json $TMP_DIR/Scanner/wasabi1_$dir/
 done
 
+# Extract TX flags
+python3 -m cj_process.parse_dumplings --cjtype ww1 --env_vars "EXPORT_TX_FLAGS=True" --target-path $TMP_DIR/
 
 # Analyse liquidity 
 python3 -m cj_process.parse_dumplings --cjtype ww1 --target-path $TMP_DIR/ --env_vars "ANALYSIS_LIQUIDITY=True" | tee parse_dumplings.py.log

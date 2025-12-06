@@ -23,7 +23,10 @@ curl -sSL "https://mempool.space/api/v1/mining/blocks/fee-rates/all" > $TMP_DIR/
 #done
 
 # Run false positives detection
-python3 -m cj_process.parse_dumplings --cjtype jm --action detect_false_positives --env_vars "" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+python3 -m cj_process.parse_dumplings --cjtype jm --action detect_false_positives --env_vars "MIX_IDS=['joinmarket_all']" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+
+# Extract TX flags
+python3 -m cj_process.parse_dumplings --cjtype jm --env_vars "EXPORT_TX_FLAGS=True" --target-path $TMP_DIR/
 
 # Analyse liquidity 
 python3 -m cj_process.parse_dumplings --cjtype jm --target-path $TMP_DIR/ --env_vars "ANALYSIS_LIQUIDITY=True" | tee parse_dumplings.py.log

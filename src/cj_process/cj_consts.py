@@ -26,7 +26,9 @@ WASABI2_FUNDING_TXS['opencoordinator'] = {'start_date': '2025-05-02 21:43:13.000
 
 WASABI2_COORD_NAMES_ALL = ["kruw", "gingerwallet", "opencoordinator", "wasabicoordinator",
                   "coinjoin_nl", "wasabist", "dragonordnance", "mega", "btip",
-                  "strange_2025", "unknown_2024", "others", "zksnacks"]
+                  "strange_2025", "unknown_2024_e85631", "unknown_2024_28ce7b", "others", "zksnacks"]
+
+WASABI1_COORD_NAMES_ALL = ["others", "zksnacks"]
 
 # Threshold from BIP-125: any input with nSequence < 0xFFFFFFFE signals RBF.
 RBF_THRESHOLD = 0xFFFFFFFE  # 4294967294

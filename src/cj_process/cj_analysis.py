@@ -1,17 +1,17 @@
+import copy
 import os
 import subprocess
 from collections import Counter, defaultdict
 import sqlite3
 import logging
 from pathlib import Path
-from typing import List
-
+from statistics import median
 #import msgpack
 import orjson
 import json
 import time
 import numpy as np
-from datetime import timedelta
+from datetime import timedelta, datetime, UTC
 import re
 import math
 #from  txstore import TxStore, TxStoreMsgPack
@@ -91,7 +91,6 @@ def detect_stdenom_rbf_notap_onechange_txs(coinjoins):
                     #and len(script_freq['outputs']) == 1 and script_freq['outputs'].get('TxWitnessV1Taproot', 0) == 0):
                     isZeroTaproot = True
             if isZeroTaproot:
-
                 # Has exactly one change output?
                 output_denoms = [coinjoins[cjtx]['outputs'][index]['value'] for index in coinjoins[cjtx]['outputs'].keys()]
                 counts = Counter(output_denoms).values()
@@ -99,6 +98,26 @@ def detect_stdenom_rbf_notap_onechange_txs(coinjoins):
 
                 if isExactlyOneChange:
                     hits['stdenom_rbf_notap_onechange'][cjtx] = coinjoins[cjtx]['broadcast_time']
+
+    return hits
+
+
+def detect_local_outliers_txs(coinjoins, window_size: int, outlier_threshold: float):
+    hits = {'local_outliers': {}}
+
+    sorted_cjtxs = sort_coinjoins(coinjoins, SORT_COINJOINS_BY_RELATIVE_ORDER)
+    effective_window_size = min(window_size, len(sorted_cjtxs))
+    for index in range(0, len(sorted_cjtxs) - effective_window_size + 1):
+        # BUGBUG: inefficient implementation, use more clever sliding window instead
+        local_flag_string = [coinjoins[item['txid']]['flags_str'] for item in sorted_cjtxs[index:index + effective_window_size]]
+        flags_counts = Counter(local_flag_string)
+        for value, count in flags_counts.items():
+            if count == 1 or count / effective_window_size < outlier_threshold:
+                outlier_flags = value
+                for record in sorted_cjtxs[index:index+window_size]:
+                    if coinjoins[record['txid']]['flags_str'] == outlier_flags:
+                        # hits['local_outliers'][record['txid']] = f"{coinjoins[record['txid']]['broadcast_time']}__{coinjoins[record['txid']]['flags_str']}"
+                        hits['local_outliers'][record['txid']] = f"{coinjoins[record['txid']]['broadcast_time']}"
 
     return hits
 
@@ -129,6 +148,25 @@ def detect_address_reuse_txs(coinjoins, reuse_threshold: float):
     addr_reuse['both_reuse'] = {cjtx: coinjoins[cjtx]['broadcast_time'] for cjtx in reused_txs}
     logging.warning(f'Txs with no input&output remix: {addr_reuse["both_reuse"]}')
     return addr_reuse
+
+
+def detect_unbalanced_inout_txs(coinjoins, unbalance_threshold: float):
+    """
+    Detect transactions with unbalanced number of inputs and outputs.
+    :param coinjoins: structure with all coinjoins
+    :param unbalance_threshold: value between 0 and 1. Higher the threshold, more significant ratio between inputs and outputs is required to classify as hit
+    :return: detected txs with unbalanced number of inputs to outputs
+    """
+    results = {'unbalanced_inouts': {}}
+    for cjtx in coinjoins.keys():
+        num_ins = len(coinjoins[cjtx]['inputs'])
+        num_outs = len(coinjoins[cjtx]['outputs'])
+
+        denom = max(abs(num_ins), abs(num_outs))
+        if denom != 0 and abs(num_ins - num_outs) / denom >= unbalance_threshold:
+            results['unbalanced_inouts'][cjtx] = coinjoins[cjtx]['broadcast_time']
+
+    return results
 
 
 def detect_specific_cj_denoms(coinjoins: dict, specific_denoms_list: list, min_times_most_frequent_denom: int, exact_times_least_frequent_denom: int):
@@ -173,9 +211,12 @@ def get_ratio(numerator, denominator) -> int:
 
 def get_ratio_string(numerator, denominator) -> str:
     if denominator != 0:
-        return f'{numerator}/{denominator} ({get_ratio(numerator, denominator)}%)'
+        if isinstance(numerator, int):
+            return f'{numerator}/{denominator} ({get_ratio(numerator, denominator)}%)'
+        else:
+            return f'{numerator:.2f}/{denominator:.2f} ({get_ratio(numerator, denominator)}%)'
     else:
-        return f'{numerator}/{0} (0%)'
+        return f'{numerator:.2f}/{0} (0%)'
 
 
 def get_inputs_type_list(coinjoins, sorted_cj_time, event_type, in_or_out: str, burn_time_from, burn_time_to, analyze_values, restrict_to_in_size: (int, int), only_standard_denoms: False):
@@ -196,7 +237,7 @@ def get_inputs_type_list(coinjoins, sorted_cj_time, event_type, in_or_out: str, 
 
 
 
-def get_wallets_prediction_ratios(mix_id: str):
+def get_wallets_prediction_ratios(mix_id: str, prediction_matrix: dict=None):
     # NOTE: Based on real wallet experiments, average number of outputs (AVG_NUM_OUTPUTS) is significantly more
     # independent of number of coins in wallet and stable => take it as fixed point and compute synthetic value for AVG_NUM_INPUTS
 
@@ -216,12 +257,18 @@ def get_wallets_prediction_ratios(mix_id: str):
         #AVG_NUM_INPUTS = 3.65  # real value taken from kruw.io as38 experiment (use for kruw)
         AVG_NUM_INPUTS = 4.44 #  synthetic value minimizing euclidean distance for  kruw.io for interval 02/2025 if AVG_NUM_OUTPUTS = 4.92
         #AVG_NUM_INPUTS = 4.03 #  synthetic value minimizing euclidean distance for  kruw.io for interval 03/2025 if AVG_NUM_OUTPUTS = 4.92
+        if prediction_matrix:
+            AVG_NUM_INPUTS = prediction_matrix['inputs']['1']['mu_hat']
+            AVG_NUM_OUTPUTS = prediction_matrix['outputs']['1']['mu_hat']
 
     # zksnacks
     if 'zksnacks' in mix_id:
         AVG_NUM_OUTPUTS = 4.17 # real value taken from zksnacks as25 experiment (use for zksnacks)
         AVG_NUM_INPUTS = 2.72  # real value taken from zksnacks as25 experiment (use for zksnacks)
 #        AVG_NUM_OUTPUTS = 2.91 # synthetic median value minimizing euclidean distance between output and input factors for zksnacks if AVG_NUM_INPUTS = 2.72
+        if prediction_matrix:
+            AVG_NUM_INPUTS = prediction_matrix['inputs']['1']['mu_hat']
+            AVG_NUM_OUTPUTS = prediction_matrix['outputs']['1']['mu_hat']
 
     # Wasabi 1.x
     if 'wasabi1' in mix_id:
@@ -345,7 +392,7 @@ def print_liquidity_summary(coinjoins: dict, mix_id: str):
     lr['ratio_staying_outputs_2_total_outputs'] = get_ratio_string(total_mix_staying_number, total_outputs_number)
     lr['ratio_staying_outputs_2_nonremix_outputs'] = get_ratio_string(total_mix_staying_number, total_outputs_number - total_mix_remix_out_number)
     lr['ratio_remixed_inputs_2_total_inputs_numbers'] = get_ratio_string(total_mix_remix_number, total_inputs_number)
-    lr['ratio_remixed_inputs_2_total_inputs_values'] = get_ratio_string(total_mix_remix_value, total_inputs_value)
+    lr['ratio_remixed_inputs_2_total_inputs_values'] = get_ratio_string(total_mix_remix_value / SATS_IN_BTC, total_inputs_value / SATS_IN_BTC)
     lr['total_fresh_inputs_value'] = total_mix_entering_value / SATS_IN_BTC
     lr['total_friends_inputs_value'] = total_mix_friends_value / SATS_IN_BTC
     lr['total_unmoved_outputs_value'] = total_mix_staying_value / SATS_IN_BTC
@@ -355,7 +402,7 @@ def print_liquidity_summary(coinjoins: dict, mix_id: str):
     mix_id_latex = mix_id.replace('_', '\\_' )
     lr['latex_summary'] = f'\\hline   ' \
              + f'{mix_id_latex} & {earliest_time}--{latest_time} & ' \
-             + f'{len(coinjoins.keys())} & {total_mix_entering_number} / {round(total_mix_entering_value / SATS_IN_BTC, 1)}~\\bitcoinSymbol' + '{} & ' \
+             + f"{len(coinjoins.keys())} & {total_mix_entering_number} / {round(lr['total_fresh_inputs_without_nonstandard_outputs_value'], 1)}~\\bitcoinSymbol" + "{} & " \
              + f'{get_ratio(total_mix_remix_value, total_inputs_value)}\\% & ' \
              + f'{get_ratio(total_mix_staying_number, total_outputs_number - total_mix_remix_out_number)}\\%, {round(total_mix_staying_value / SATS_IN_BTC, 1)}~\\bitcoinSymbol' + '{} & ' \
              + f'{min(total_inputs_len)} / {round(np.average(total_inputs_len), 1)} / {max(total_inputs_len)} \\\\'
@@ -435,6 +482,93 @@ def recompute_enter_remix_liquidity_after_removed_cjtxs(coinjoins, mix_protocol:
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_as_mined'] = 0
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative'] = 0
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] = 0
+
+
+def unfinished_recompute_enter_remix_liquidity_after_added_cjtxs(coinjoins, mix_protocol: MIX_PROTOCOL):
+    """
+    Problem:  we need to set also ['mix_event_type'] for newly added transactions
+    Call after some changes to existing set of coinjoins were made to update MIX_ENTER and MIX_REMIX values.
+    Expected to be called after full analysis by analyze_input_out_liquidity()
+    :param coinjoins: dictionary with coinjoins
+    :param mix_protocol: type of protocol
+    :return:
+    """
+    logging.debug('recompute_enter_remix_liquidity_after_added_cjtxs() started')
+
+    # Idea: Coinjoins may have been added from the set of coinjoins, changing MIX_ENTER -> MIX_REMIX for inputs
+    # and MIX_LEAVE -> MIX_REMIX for outputs
+    # Detect these cases and rectify.
+
+    broadcast_times = {cjtx: precomp_datetime.strptime(coinjoins[cjtx]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f") for cjtx in coinjoins.keys()}
+    # Sort coinjoins based on mining time
+    cj_time = [{'txid': cjtxid, 'broadcast_time': precomp_datetime.strptime(coinjoins[cjtxid]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f")} for cjtxid in coinjoins.keys()]
+    sorted_cj_times = sorted(cj_time, key=lambda x: x['broadcast_time'])
+    # Precomputed mapping of txid to index for fast burntime computation
+    coinjoins_index = {}
+    for i in range(0, len(sorted_cj_times)):
+        coinjoins_index[sorted_cj_times[i]['txid']] = i
+    coinjoins_relative_order = compute_cjtxs_relative_ordering(coinjoins)
+
+    for cjtx in coinjoins:
+        for input in coinjoins[cjtx]['inputs']:
+            if 'spending_tx' in coinjoins[cjtx]['inputs'][input].keys():
+                update_item = False
+                spending_tx, index = extract_txid_from_inout_string(coinjoins[cjtx]['inputs'][input]['spending_tx'])
+                if 'mix_event_type' in coinjoins[cjtx]['inputs'][input]:
+                    if coinjoins[cjtx]['inputs'][input]['mix_event_type'] == MIX_EVENT_TYPE.MIX_ENTER.name and spending_tx in coinjoins.keys():
+                        # Change to MIX_ENTER as original cjtx is no longer in coinjoin set
+                        logging.debug(f'Changing MIX_ENTER -> MIX_REMIX for input {cjtx}[{input}]')
+                        update_item = True
+                else:
+                    if spending_tx in coinjoins.keys():
+                        # Set to MIX_ENTER as original cjtx is no longer in coinjoin set
+                        logging.debug(f'Setting MIX_REMIX for input {cjtx}[{input}]')
+                        update_item = True
+                    else:
+                        # Not in coinjoin, fresh liquidity
+                        coinjoins[cjtx]['inputs'][input]['mix_event_type'] = MIX_EVENT_TYPE.MIX_ENTER.name
+
+
+                if update_item:
+                    coinjoins[cjtx]['inputs'][input]['mix_event_type'] = MIX_EVENT_TYPE.MIX_REMIX.name
+                    coinjoins[cjtx]['inputs'][input]['burn_time'] = round((broadcast_times[cjtx] - broadcast_times[spending_tx]).total_seconds(), 0)
+                    coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs_as_mined'] = coinjoins_index[cjtx] - coinjoins_index[spending_tx]
+                    coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs_relative'] = coinjoins_relative_order[cjtx] - coinjoins_relative_order[spending_tx]
+                    coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs'] = coinjoins[cjtx]['inputs'][input]['burn_time_cjtxs_relative']
+
+
+        for output in coinjoins[cjtx]['outputs']:
+            if 'spend_by_tx' in coinjoins[cjtx]['outputs'][output].keys():
+                update_item = False
+                spend_by_tx, index = extract_txid_from_inout_string(coinjoins[cjtx]['outputs'][output]['spend_by_tx'])
+
+                if 'mix_event_type' in coinjoins[cjtx]['outputs'][output]:
+                    if coinjoins[cjtx]['outputs'][output]['mix_event_type'] == MIX_EVENT_TYPE.MIX_LEAVE.name and spend_by_tx in coinjoins.keys():
+                        logging.debug(f'Changing MIX_LEAVE -> MIX_REMIX for output {cjtx}[{output}]')
+                        update_item = True
+                else:
+                    if spend_by_tx in coinjoins.keys():
+                        logging.debug(f'Setting MIX_REMIX for input {cjtx}[{output}]')
+                        update_item = True
+                    else:
+                        # Spent outside coinjoin
+                        coinjoins[cjtx]['outputs'][output]['mix_event_type'] = MIX_EVENT_TYPE.MIX_LEAVE.name
+                        # BUGBUG: we need to find spending tx to compute burn time properly
+
+                if update_item:
+                    coinjoins[cjtx]['outputs'][output]['mix_event_type'] = MIX_EVENT_TYPE.MIX_REMIX.name
+                    coinjoins[cjtx]['outputs'][output]['burn_time'] = round((broadcast_times[spend_by_tx] - broadcast_times[cjtx]).total_seconds(), 0)
+                    coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_as_mined'] = coinjoins_index[spend_by_tx] - coinjoins_index[cjtx]
+                    coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative'] = coinjoins_relative_order[spend_by_tx] - coinjoins_relative_order[cjtx]
+                    coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] = coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative']
+            else:
+                if 'mix_event_type' not in coinjoins[cjtx]['outputs'][output]:
+                    # BUGBUG: newly added transaction without 'mix_event_type' for this specific output set.
+                    # May be MIX_EVENT_TYPE.MIX_STAY, MIX_EVENT_TYPE.MIX_LEAVE as well as MIX_EVENT_TYPE.MIX_REMIX
+                    logging.error(f"Missing status of output for {cjtx}['outputs']{output}")
+
+
+    return coinjoins
 
 
 def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, premix_spend, mix_protocol: MIX_PROTOCOL, ww1_coinjoins:dict = None, ww1_postmix_spend:dict = None, warn_if_not_found_in_postmix:bool = True):
@@ -547,7 +681,7 @@ def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, prem
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_as_mined'] = coinjoins_index[spend_by_tx] - coinjoins_index[cjtx]
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative'] = coinjoins_relative_order[spend_by_tx] - coinjoins_relative_order[cjtx]
                     coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] = coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs_relative']
-                    if mix_protocol != MIX_PROTOCOL.JOINMARKET: # JoinMarket may end-up with schuffled transactions??
+                    if mix_protocol != MIX_PROTOCOL.JOINMARKET:  # JoinMarket may end-up with shuffled transactions??
                         assert coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs'] >= 0, \
                             f"Invalid burn time computed for {cjtx}:{output}; got {coinjoins[cjtx]['outputs'][output]['burn_time_cjtxs']}; {spend_by_tx} - {cjtx}"
 
@@ -630,6 +764,11 @@ def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, prem
     return coinjoins_relative_order
 
 
+def smooth_interval(lst, window_size):
+    #return compute_medians(lst, window_size)
+    return compute_averages(lst, window_size)
+
+
 def compute_averages(lst, window_size):
     averages = []
     window_sum = sum(lst[:window_size])  # Initialize the sum of the first window
@@ -642,6 +781,20 @@ def compute_averages(lst, window_size):
         averages.append(window_sum / window_size)  # Compute and store the average of the current window
 
     return averages
+
+
+def compute_medians(lst, window_size):
+    if window_size < 1:
+        raise ValueError("window_size must be >= 1")
+    if window_size > len(lst):
+        return []
+
+    medians = []
+    for i in range(len(lst) - window_size + 1):
+        window = lst[i:i + window_size]
+        medians.append(median(window))
+
+    return medians
 
 
 def get_output_name_string(txid, index):
@@ -1170,6 +1323,29 @@ def load_coinjoins_from_file(target_load_path: str | Path, false_cjtxs: dict | N
     return data
 
 
+def load_coordinator_mapping_from_file(target_load_path: str | Path, filter_source_str: str=None):
+    # Load initial data (two-level dictionary)
+    data = load_json_from_file(target_load_path)
+    # If required, filter out all keys which does not contain filter_source_str (if required)
+    if filter_source_str is not None:
+        for data_source in list(data.keys()):
+            if filter_source_str not in data_source:
+                data.pop(data_source)
+
+    # Collapse into single-level dictionary with conflicts checking
+    collapsed = {}
+    for source in data.keys():
+        for txid in data[source].keys():
+            if txid not in collapsed.keys():
+                collapsed[txid] = data[source][txid]
+            else:
+                assert collapsed[txid] == data[source][txid], f'Conflict in mapped coordinators for {txid} between {collapsed[txid]} and {data[source][txid]}'
+                # if collapsed[txid] != data[source][txid]:
+                #     print(f'Conflict in mapped coordinators for {txid} between {collapsed[txid]} and {data[source][txid]}')
+
+    return collapsed
+
+
 def compute_partial_vsize(tx_hex: str, input_indices: list[int], output_indices: list[int]):
     """
     Compute the exact virtual size (vsize) contribution of selected inputs and outputs
@@ -1252,13 +1428,17 @@ def detect_bybit_hack(target_path: str, interval: str, bybit_hack_addresses: dic
     return results
 
 
-def generate_tx_download_script(txids: list, file_name):
+def generate_tx_download_script(txids: list, file_name, target_path: Path | str):
     curl_lines = []
     for cjtx in txids:
-        curl_str = "curl --user user:password --data-binary \'{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getrawtransaction\", \"params\": [\"" + cjtx + "\", true]}\' -H \'Content-Type: application/json\' http://127.0.0.1:8332/" + f" > {cjtx}.json\n"
-        curl_lines.append(curl_str)
+        # Generate download record only for transactions not yet downloaded
+        if not os.path.exists(os.path.join(target_path, f'{cjtx}.json')):
+            curl_str = "curl --user user:password --data-binary \'{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getrawtransaction\", \"params\": [\"" + cjtx + "\", true]}\' -H \'Content-Type: application/json\' http://127.0.0.1:8332/" + f" > {cjtx}.json\n"
+            curl_lines.append(curl_str)
     with open(file_name, 'w') as f:
         f.writelines(curl_lines)
+
+    return file_name
 
 
 def get_input_address(txid, txid_in_out, raw_txs: dict = None):
@@ -1305,6 +1485,8 @@ def extract_tx_info(txid: str, raw_txs: dict):
         # tx_record['raw_tx_json'] = parsed_data
         tx_record['inputs'] = {}
         tx_record['outputs'] = {}
+        datetime_obj = datetime.fromtimestamp(tx_info['blocktime'], tz=UTC)
+        tx_record['broadcast_time'] = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
         inputs = parsed_data['vin']
         index = 0
@@ -1312,25 +1494,25 @@ def extract_tx_info(txid: str, raw_txs: dict):
             # we need to read and parse previous transaction to obtain address and other information
             in_address, in_full_info = get_input_address(input['txid'], input['vout'], raw_txs)
 
-            tx_record['inputs'][index] = {}
-            tx_record['inputs'][index]['address'] = in_address
-            tx_record['inputs'][index]['txid'] = input['txid']
-            tx_record['inputs'][index]['value'] = int(in_full_info['vout'][input['vout']]['value'] * SATS_IN_BTC)
-            tx_record['inputs'][index]['spending_tx'] = get_output_name_string(input['txid'], input['vout'])
-            tx_record['inputs'][index]['wallet_name'] = 'real_unknown'
+            tx_record['inputs'][str(index)] = {}
+            tx_record['inputs'][str(index)]['address'] = in_address
+            tx_record['inputs'][str(index)]['txid'] = input['txid']
+            tx_record['inputs'][str(index)]['value'] = int(in_full_info['vout'][input['vout']]['value'] * SATS_IN_BTC)
+            tx_record['inputs'][str(index)]['spending_tx'] = get_output_name_string(input['txid'], input['vout'])
+            tx_record['inputs'][str(index)]['wallet_name'] = 'real_unknown'
 
-            input_addresses[index] = in_address  # store address to index of the input
+            input_addresses[str(index)] = in_address  # store address to index of the input
             index = index + 1
 
         outputs = parsed_data['vout']
         for output in outputs:
             index = output['n']
-            output_addresses[index] = output['scriptPubKey']['address']
-            tx_record['outputs'][index] = {}
-            tx_record['outputs'][index]['address'] = output['scriptPubKey']['address']
-            tx_record['outputs'][index]['value'] = int(output['value'] * SATS_IN_BTC)
-            # tx_record['outputs'][index]['spend_by_tx'] = get_input_name_string(output['txid'], output['vout'])
-            tx_record['outputs'][index]['wallet_name'] = 'real_unknown'
+            output_addresses[str(index)] = output['scriptPubKey']['address']
+            tx_record['outputs'][str(index)] = {}
+            tx_record['outputs'][str(index)]['address'] = output['scriptPubKey']['address']
+            tx_record['outputs'][str(index)]['value'] = int(output['value'] * SATS_IN_BTC)
+            # tx_record['outputs'][str(index)]['spend_by_tx'] = get_input_name_string(output['txid'], output['vout'])
+            tx_record['outputs'][str(index)]['wallet_name'] = 'real_unknown'
 
     except json.JSONDecodeError as e:
         print("Error decoding JSON:", e)
@@ -1412,31 +1594,468 @@ def streamline_coinjoins_structure(all_data:dict, compact_strong: bool=False):
     return full_txid_mapping
 
 
-def analyze_coordinator_detection(cjtxs: dict, tx_list: dict, coords: List):
-    # Transform dictionary to {'coord': [cjtxs]} format
-    tx_list_t = defaultdict(list)
-    for key, value in tx_list.items():
-        tx_list_t[value].append(key)
+def discover_coordinators(cjtxs: dict, sorted_cjtxs: list, coord_txs: dict, in_or_out: str,
+                          min_coord_cjtxs: int, min_coord_fraction: float):
+    """
 
-    # For given coordinator, compute statistics for all its transactions
-    intercoord_ratios = {}
-    for coord in coords:
-        intercoord_ratios[coord] = {}
-        # Compute ratio of in-coordinator remixes
-        # For each remixed input, check if it is coming form the same coordinator
-        for txid in tx_list_t[coord]:
-            if txid in cjtxs['coinjoins'].keys():
-                remix_inputs = [index for  index in cjtxs['coinjoins'][txid]['inputs'].keys() if cjtxs['coinjoins'][txid]['inputs'][index]['mix_event_type'] == 'MIX_REMIX']
-                remix_outputs = [index for  index in cjtxs['coinjoins'][txid]['outputs'].keys() if cjtxs['coinjoins'][txid]['outputs'][index]['mix_event_type'] == 'MIX_REMIX']
-                num_same_coord_inputs = sum([1 for index in remix_inputs
-                                             if 'spending_tx' in cjtxs['coinjoins'][txid]['inputs'][index]
-                                             and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['inputs'][index]['spending_tx'])[0], '-') == coord])
-                num_same_coord_outputs = sum([1 for index in remix_outputs
-                                              if 'spend_by_tx' in cjtxs['coinjoins'][txid]['outputs'][index]
-                                              and tx_list.get(extract_txid_from_inout_string(cjtxs['coinjoins'][txid]['outputs'][index]['spend_by_tx'])[0], '-') == coord])
-                intercoord_ratios[coord][txid] = {'broadcast_time': cjtxs['coinjoins'][txid]['broadcast_time'],
-                                                 'in_ratio': num_same_coord_inputs / len(remix_inputs) if len(remix_inputs) > 0 else 0,
-                                                 'out_ratio': num_same_coord_outputs / len(remix_outputs) if len(remix_outputs) > 0 else 0}
+    :param cjtxs:  All coinjoin transactions structure
+    :param coord_txs: Mapping between cooridnator id and all its cjtxs
+    :param sorted_cjtxs: Pre-sorted cjtxs (e.g., relative ordering based on transaction connections)
+    :param in_or_out: if 'inputs', assignment wil be done based on cjtx inputs, if 'outputs' then on outputs
+    :param min_coord_cjtxs minimum threshold number of coinjoins under coordinator to keep from filtering
+    :param min_coord_fraction: minimum fraction of inputs/outputs to specific coordinator to assign
+    :return: updated value of coord_txs and next_coord_index
+    """
+    print(f'\nFiltering small coordinators (min={min_coord_cjtxs})...')
+    # Filter out coordinator ids with at least MIN_COORD_CJTXS transactions
+    coord_txs_filtered = {coord_id: coord_txs[coord_id] for coord_id in coord_txs.keys()
+                          if len(coord_txs[coord_id]) >= min_coord_cjtxs}
+    print(f'  Total non-small coordinators: {len(coord_txs_filtered)}')
+    # Reset coordinator ids for next iteration to start again from 0 to have unique counter again
+    coord_ids = {}  # Speedup structure for fast cjtxs -> coordinator queries
+    next_coord_index = -1
+    coord_txs = {}  # Clear cjtx mapped to coordinator id for next iteration (will be re-created)
+    for coord_id in coord_txs_filtered:  # All non-small coordinators
+        next_coord_index = next_coord_index + 1
+        for cjtx in coord_txs_filtered[coord_id]:
+            coord_ids[cjtx] = next_coord_index
+        coord_txs[next_coord_index] = coord_txs_filtered[coord_id]
+        print(f'  coord. {next_coord_index}: {len(coord_txs_filtered[coord_id])} txs')
+    print(f'Starting with next unused coordinator id: {next_coord_index + 1}\n')
 
-    return intercoord_ratios
+    UNASSIGNED_COORD = -1
+    for cjtx in sorted_cjtxs:
+        if coord_ids.get(cjtx, UNASSIGNED_COORD) != UNASSIGNED_COORD:  # Check if already assigned
+            continue
+        if in_or_out == 'inputs':
+            input_coords = [
+                coord_ids.get(extract_txid_from_inout_string(cjtxs[cjtx]['inputs'][index]['spending_tx'])[0],
+                              UNASSIGNED_COORD) for index in cjtxs[cjtx]['inputs'].keys()]
+        elif in_or_out == 'outputs':
+            input_coords = [
+                coord_ids.get(extract_txid_from_inout_string(cjtxs[cjtx]['outputs'][index]['spend_by_tx'])[0],
+                              UNASSIGNED_COORD) for index in cjtxs[cjtx]['outputs'].keys()
+                                if 'spend_by_tx' in cjtxs[cjtx]['outputs'][index].keys()]
+        else:
+            assert False, f'Incorrect parameter in_or_out={in_or_out}'
+
+        if len(input_coords) > 0:
+            input_value_counts = Counter(input_coords)
+            input_dominant_coord = input_value_counts.most_common()  # Take sorted list of the most common coordinators
+            if input_dominant_coord[0][0] == UNASSIGNED_COORD:  # Dominant is not assigned
+                if len(input_dominant_coord) > 1 and input_dominant_coord[1][1] / len(input_coords) >= min_coord_fraction:
+                    # Take the second most dominant coordinator (after unassigned one which might be zksnacks)
+                    coord_ids[cjtx] = input_dominant_coord[1][0]  # Mark this cjtx as belonging to the dominant coordinator
+                    coord_txs[input_dominant_coord[1][0]].append(cjtx)  # Store cjtx for this coordinator
+                else:
+                    # Setup new coordinator
+                    next_coord_index = next_coord_index + 1  # Assign unique new id (counter) for the coordinator
+                    coord_ids[cjtx] = next_coord_index  # Assign coordinator id to this cjtx for future reference
+                    coord_txs[next_coord_index] = [cjtx]  # Create new list for this coordinator, store current cjtx
+            else:  # Dominant coordinator is already existing one
+                coord_ids[cjtx] = input_dominant_coord[0][0]  # Mark this cjtx as belonging to the dominant coordinator
+                coord_txs[input_dominant_coord[0][0]].append(cjtx)  # Store cjtx for this coordinator
+
+    return coord_txs, next_coord_index
+
+
+def wasabi_detect_coordinators_orig(mix_id: str, protocol: MIX_PROTOCOL, target_path):
+    """
+    Detect propagation of remix outputs to identify separate coordinators. Based on the assumption,
+    that coinjoins under same coordinator will have majority of remixed inputs from the same coordinator.
+    :param mix_id:
+    :param protocol:
+    :param target_path:
+    :return:
+    """
+    # Read, filter and sort coinjoin transactions
+    cjtxs = load_coinjoins_from_file(target_path, None, True)["coinjoins"]
+    ordering = compute_cjtxs_relative_ordering(cjtxs)
+    sorted_cjtxs = sorted(ordering, key=ordering.get)
+
+    # Load known coordinators (will be used as starting set to expend to additional transactions)
+    ground_truth_known_coord_txs = load_json_from_file(os.path.join(target_path, 'txid_coord.json'))  # Load known coordinators
+    # Transform dictionary to {'coord': [cjtstxs]} format
+    transformed_dict = defaultdict(list)
+    for key, value in ground_truth_known_coord_txs.items():
+        transformed_dict[value].append(key)
+    initial_known_txs = dict(transformed_dict)
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_t.json'), initial_known_txs)
+
+    # Establish coordinator ids using two-pass process:
+    # 1. First pass: Count dominant already existing coordinator for cjtx inputs.
+    #    If not existing yet (-1), get new unique id (counter) and assign it for future processing
+    # 2. Second pass: Perform second pass with coordinators with lower than MIN_COORD_CJTXS
+    #    First pass may misclassify coordinators if transactions are out of order.
+    MIN_COORD_CJTXS = 10
+    MIN_COORD_FRACTION = 0.4
+
+    coord_txs = initial_known_txs
+    last_num_coordinators = -1
+    pass_step = 0
+    while last_num_coordinators != len(coord_txs):
+        last_num_coordinators = len(coord_txs)
+        print(f'\n# Current step {pass_step}')
+
+        # Discover based on inputs
+        coord_txs, next_coord_index = discover_coordinators(cjtxs, sorted_cjtxs, coord_txs, 'inputs', MIN_COORD_CJTXS, MIN_COORD_FRACTION)
+        print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
+
+        # Discover additionally based on outputs
+        DISCOVER_ON_OUTPUTS = True
+        if DISCOVER_ON_OUTPUTS:
+            coord_txs, next_coord_index = discover_coordinators(cjtxs, sorted_cjtxs, coord_txs, 'outputs', MIN_COORD_CJTXS, MIN_COORD_FRACTION)
+            print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
+
+        pass_step = pass_step + 1
+
+    # Print all coordinators and their txs
+    print(f'\nTotal passes executed: {pass_step}')
+
+    # TODO: Compute discovered stats to initial_known_txs
+
+    # Try to merge coordinators
+    # Idea: Almost all transactions are now assigned to perspective non-small coordinators
+    #   Check again if coordinator infered from inputs and outputs match.
+    #   If not, the is candidate for merging
+    UNASSIGNED_COORD = -1
+    coord_ids = {cjtx: coord_id for coord_id in coord_txs for cjtx in coord_txs[coord_id]}
+    mergers = {coord_id: [] for coord_id in coord_txs.keys()}
+    for cjtx in sorted_cjtxs:
+        if cjtx not in coord_ids or coord_ids[cjtx] == UNASSIGNED_COORD:
+            print(f'No coordinator set for {cjtx}')
+    for cjtx in sorted_cjtxs:
+        input_coords = [coord_ids.get(extract_txid_from_inout_string(cjtxs[cjtx]['inputs'][index]['spending_tx'])[0], UNASSIGNED_COORD) for index in cjtxs[cjtx]['inputs'].keys()]
+        output_coords = [coord_ids.get(extract_txid_from_inout_string(cjtxs[cjtx]['outputs'][index]['spend_by_tx'])[0], UNASSIGNED_COORD)for index in cjtxs[cjtx]['outputs'].keys()
+                         if 'spend_by_tx' in cjtxs[cjtx]['outputs'][index].keys()]
+        input_value_counts = Counter(input_coords)
+        output_value_counts = Counter(output_coords)
+        if len(input_value_counts) > 0 and len(output_value_counts) > 0:
+            input_dominant_coord = input_value_counts.most_common()[0]
+            output_dominant_coord = output_value_counts.most_common()[0]
+            if input_dominant_coord[0] != output_dominant_coord[0]:
+                print(f'Dominant coordinator inconsistency detected for {cjtx}: {input_dominant_coord} vs. {output_dominant_coord}')
+                print(f'  now set as {coord_ids[cjtx]}')
+                if input_dominant_coord[0] != UNASSIGNED_COORD and output_dominant_coord[0] != UNASSIGNED_COORD:
+                    print(f'  candidate for merger: {input_dominant_coord[0]} and {output_dominant_coord[0]}')
+                    mergers[input_dominant_coord[0]].append(output_dominant_coord[0])
+
+
+    print('Going to print detected candidates for merging. The merging shall be considered when multiple cases '
+          'of same merge candidates are shown. '
+          'E.g. {0: [1, 1], 1: [3, 3, 3, 3, 10], 2: [], 3: [1, 1, 1, 1], 4: [1], means that 1 and 3 shall be merged, while 1 and 4 likely not.')
+    print(mergers)
+    print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
+    print_coordinators_counts(coord_txs, 2)
+
+    DO_MERGING = False
+    merged_coord_cjtxs_list = {}
+    if DO_MERGING:
+        def complete_bidirectional_closure(graph):
+            # Function to perform DFS and return all reachable nodes from a given node
+            def dfs(node, visited):
+                if node not in visited:
+                    visited.add(node)
+                    for neighbor in graph.get(node, []):
+                        dfs(neighbor, visited)
+                return visited
+
+            visited_global = set()
+
+            # Process each key in the dictionary (each node)
+            for key in graph.keys():
+                if key not in visited_global:
+                    # Find all nodes in the connected component of `key`
+                    reachable = dfs(key, set())
+
+                    # Mark all nodes in this component as visited globally
+                    visited_global.update(reachable)
+
+                    # Update all nodes in this component with the full list of reachable nodes
+                    for node in reachable:
+                        graph[node] = list(reachable)
+
+            return graph
+
+        # BUGBUG: this seems to merge too aggresively
+        # mergers = complete_bidirectional_closure(mergers)
+
+        # Manually filtered merge:
+        #mergers = {0: [0], 1: [1, 3, 10], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6], 7: [7, 8, 9]}
+        #print(f'Manual merges={mergers}')
+        #mergers = {0: [0], 1: [1, 3, 10], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6], 7: [7, 8, 9]}
+        mergers = {0: [0, 35], 1: [1, 30], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6, 39], 7: [7, 8, 9], 230: [230]}
+        # wasabi2_opencoordinator is 2 and is good
+
+        # Now merge
+        merged_coord_cjtxs = {}
+        for coord_id in sorted(mergers.keys()):
+            if len(mergers[coord_id]) > 0:
+                merged_coord_cjtxs[coord_id] = set()
+                merged_coord_cjtxs[coord_id].update([tx for tx in coord_txs[coord_id]])
+                for other_coord_id in mergers[coord_id]:
+                    merged_coord_cjtxs[coord_id].update([tx for tx in coord_txs[other_coord_id]])
+        print_coordinators_counts(merged_coord_cjtxs, MIN_COORD_CJTXS)
+
+        # Turn from set to list
+        for coord_id in merged_coord_cjtxs.keys():
+            merged_coord_cjtxs_list[coord_id] = list(merged_coord_cjtxs[coord_id])
+
+    # Detect coordinators
+    # known_txs = {'kruw': ['0ec761ff2492659c86b416395d00bb7bd33d63ff0e9cbb896bf0acb3cf30456c',
+    #                       'ca23ecbc3d5748d3655aa24b7a375378916a32b7480abce7ac3264f6c098efb9'],
+    #              'gingerwallet': ['4a11b4e831db8dfd2a28428abd5f7d61d9df2390cdd48246919e954a357d29ae',
+    #                               'eaec3b4e692d566dd4e0d3b76e4774eee15c7a07e933b2857a255f74c140e2e6',
+    #                               '8205f43ab1f0ef4190c56bbc2633dda92c7837232ee537cb8771e9b98eae0314'],
+    #              'opencoordinator': ['5097807006cb1b7d146263623c89e266cb0f7880b1566df6ec7bf1245bc72c15',
+    #                                  '00eb9cbb7f93b72ad54d1825019b7c1a6c6730a03259aaeb95d51e4f22b16ad5'],
+    #              'mega.cash': ['f16eac45453ba9614432de1507ec0783fe1e5144326a49ee32f73b006484857d',
+    #                            '13d1681f239f185a4cdac4c403cd15952500f8576479aa0edaea60256af6ac4d']}
+
+    pair_coords = {}
+    for coord_name in initial_known_txs.keys():
+        for coord_tx in initial_known_txs[coord_name][0:1]:
+            if coord_tx in coord_ids.keys():
+                print(f'coord_ids: {coord_ids[coord_tx]} paired to {coord_name} by {coord_tx}')
+                pair_coords[coord_ids[coord_tx]] = coord_name
+            else:
+                print(f'Missing entry of Dumplings-based list for {coord_tx}')
+            # for coord_id in sorted(merged_coord_cjtxs.keys()):
+            #     if coord_tx in merged_coord_cjtxs[coord_id]:
+            #         print(f'merged_coord_cjtxs: {coord_id} paired to {coord_name} by {coord_tx}')
+
+
+    # # Sort coord txs based on its broadcast time
+    # sorted_items = {}
+    # for coord in coord_txs.keys():
+    #     sorted_items[coord] = sorted(coord_txs[coord], key=lambda x: precomp_datetime.strptime(cjtxs[x]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f"))
+    # coord_txs = sorted_items
+
+    # Save discovered coordinators
+    if DO_MERGING:
+        coord_txs_to_save = merged_coord_cjtxs_list
+    else:
+        coord_txs_to_save = coord_txs
+
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered.json'), coord_txs_to_save)
+    for coord_id in pair_coords.keys():
+        if coord_id in coord_txs_to_save:
+            coord_txs_to_save[pair_coords[coord_id]] = coord_txs_to_save.pop(coord_id)
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered_renamed.json'), coord_txs_to_save)
+
+    PRINT_FINAL = False
+    if PRINT_FINAL:
+        print_coordinators_counts(coord_txs, 2)
+        coord_txs_filtered = {coord_id: coord_txs[coord_id] for coord_id in coord_txs.keys() if
+                              len(coord_txs[coord_id]) >= MIN_COORD_CJTXS}
+        #print(coord_txs_filtered)
+        print(f'# Total non-small coordinators (min={MIN_COORD_CJTXS}): {len(coord_txs_filtered)}')
+
+
+def run_coordinator_detection(cjtxs: dict, sorted_cjtxs: list, ground_truth_known_coord_txs: dict, initial_known_txs: dict,
+                              ASSERT_DUPLICATE_COORD_ASSIGNMENT = True, MIN_COORD_FRACTION: float = 0.4, MIN_COORD_CJTXS: int = 10):
+    # Establish coordinator ids using two-pass process:
+    # 1. First pass: Count dominant, already existing coordinator for cjtx inputs.
+    #    If not existing yet (-1), get new unique id (counter) and assign it for future processing
+    # 2. Second pass: Perform second pass with coordinators with lower than MIN_COORD_CJTXS
+    # First pass may misclassify coordinators if transactions are out of order.
+
+    # Store names of named coordinators from initial already known set (additional coordinator ids can be recovered later)
+    named_coords = list(initial_known_txs.keys())
+
+    coord_txs = initial_known_txs
+    last_num_coordinators = -1
+    last_coord_txs = {}
+    pass_step = 0
+    # while last_num_coordinators != len(coord_txs):
+    #     last_num_coordinators = len(coord_txs)
+    while last_coord_txs != coord_txs:
+        last_coord_txs = copy.deepcopy(coord_txs)
+        print(f'\n# Current step {pass_step}: {len(coord_txs)} coordinators')
+
+        # Discover based on inputs
+        coord_txs, next_coord_index = discover_coordinators(cjtxs, sorted_cjtxs, coord_txs, 'inputs', MIN_COORD_CJTXS, MIN_COORD_FRACTION)
+        print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
+
+        # Discover additionally based on outputs
+        DISCOVER_ON_OUTPUTS = True
+        if DISCOVER_ON_OUTPUTS:
+            coord_txs, next_coord_index = discover_coordinators(cjtxs, sorted_cjtxs, coord_txs, 'outputs', MIN_COORD_CJTXS, MIN_COORD_FRACTION)
+            print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
+
+        pass_step = pass_step + 1
+
+    print(f'\nTotal passes executed: {pass_step}')
+
+    # Try to find candidates for merging (no actual merging performed)
+    # Idea: Almost all transactions are now assigned to perspective non-small coordinators
+    #   Check again if coordinator inferred from inputs and outputs match.
+    #   If not, that is candidate for merging of clusters.
+    #   'mergers' structure contains one record for each transaction, which has mismatch dominant coordinator based
+    #      on inputs and outputs => mismatched coordinators might be actually same one
+    UNASSIGNED_COORD = -1
+    coord_ids = {cjtx: coord_id for coord_id in coord_txs for cjtx in coord_txs[coord_id]}
+    merge_candidates = {coord_id: [] for coord_id in coord_txs.keys()}
+    merge_candidates_dict = {}
+    merge_candidates_dict["merge_candidates"] = {coord_id: [] for coord_id in coord_txs.keys()}
+    merge_candidates_dict["all_cluster_links"] = {coord_id: [] for coord_id in coord_txs.keys()}
+    merge_candidates_dict["all_cluster_links"][UNASSIGNED_COORD] = []
+    for cjtx in sorted_cjtxs:
+        if cjtx not in coord_ids or coord_ids[cjtx] == UNASSIGNED_COORD:
+            print(f'No coordinator set for {cjtx}')
+    for cjtx in sorted_cjtxs:
+        input_coords = [coord_ids.get(extract_txid_from_inout_string(cjtxs[cjtx]['inputs'][index]['spending_tx'])[0], UNASSIGNED_COORD) for index in cjtxs[cjtx]['inputs'].keys()]
+        output_coords = [coord_ids.get(extract_txid_from_inout_string(cjtxs[cjtx]['outputs'][index]['spend_by_tx'])[0], UNASSIGNED_COORD)for index in cjtxs[cjtx]['outputs'].keys()
+                         if 'spend_by_tx' in cjtxs[cjtx]['outputs'][index].keys()]
+        input_value_counts = Counter(input_coords)
+        output_value_counts = Counter(output_coords)
+
+        if cjtx in coord_ids:
+            merge_candidates_dict["all_cluster_links"][coord_ids[cjtx]].append(
+                {'txid': cjtx, 'input_coords': input_value_counts, 'output_coords': output_value_counts})
+        else:
+            merge_candidates_dict["all_cluster_links"][UNASSIGNED_COORD].append(
+                {'txid': cjtx, 'input_coords': input_value_counts, 'output_coords': output_value_counts})
+
+        if len(input_value_counts) > 0 and len(output_value_counts) > 0:
+            input_dominant_coord = input_value_counts.most_common()[0]
+            output_dominant_coord = output_value_counts.most_common()[0]
+
+            if input_dominant_coord[0] != output_dominant_coord[0]:
+                print(f'Dominant coordinator inconsistency detected for {cjtx}: coord={input_dominant_coord[0]}:{input_dominant_coord[1]}x vs. coord={output_dominant_coord[0]}:{output_dominant_coord[1]}x')
+                print(f'  now set as {coord_ids[cjtx]}')
+                if input_dominant_coord[0] != UNASSIGNED_COORD and output_dominant_coord[0] != UNASSIGNED_COORD:
+                    print(f'  candidate for merger: {input_dominant_coord[0]} and {output_dominant_coord[0]}')
+                    print(f'    input coordinators: {input_coords}')
+                    print(f'    output coordinators: {output_coords}')
+                    merge_candidates[input_dominant_coord[0]].append(output_dominant_coord[0])
+
+                    merge_candidates_dict["merge_candidates"][input_dominant_coord[0]].append({'txid': cjtx, 'output_coord': output_dominant_coord[0], 'input_coords': input_coords, 'output_coords': output_coords})
+
+
+    print('Going to print detected candidates for merging. The merging shall be considered when multiple cases '
+          'of same merge candidates are shown. '
+          'E.g. {0: [1, 1], 1: [3, 3, 3, 3, 10], 2: [], 3: [1, 1, 1, 1], 4: [1], means that 1 and 3 shall be merged, while 1 and 4 likely not.')
+    print(merge_candidates)
+    print_coordinators_counts(coord_txs, MIN_COORD_CJTXS)
+    print_coordinators_counts(coord_txs, 2)
+
+    #
+    # Merging detected clusters to already known named coordinators
+    #
+    # Note: fully automated merging of complete whole clusters is NOT performed, consult wasabi_detect_coordinators_orig.complete_bidirectional_closure() for such option
+    pair_cluster_index_2_coord_name = {}
+    for cluster_index in coord_txs.keys():
+        if cluster_index in pair_cluster_index_2_coord_name.keys():
+            CHECK_COORDINATOR_CONSISTENCY = True
+            if not CHECK_COORDINATOR_CONSISTENCY:
+                continue  # If already paired, then we can speedup and do no checking
+        for txid in coord_txs[cluster_index]:
+            if txid in ground_truth_known_coord_txs:
+                # Transaction is known to be paired to known coordinator => pair whole cluster
+                if cluster_index not in pair_cluster_index_2_coord_name.keys():
+                    # New pairing detected
+                    print(f'coord_ids: {cluster_index} paired to {ground_truth_known_coord_txs[txid]} by {txid}')
+                    pair_cluster_index_2_coord_name[cluster_index] = ground_truth_known_coord_txs[txid]
+                else:
+                    # For testing of robustness of coordinator detection, we need to disable this assert
+                    if ASSERT_DUPLICATE_COORD_ASSIGNMENT:
+                        assert pair_cluster_index_2_coord_name[cluster_index] == ground_truth_known_coord_txs[txid], \
+                            f'Duplicate coordinator pairing detected for cluster {cluster_index}: {pair_cluster_index_2_coord_name[cluster_index]} vs. {ground_truth_known_coord_txs[txid]}'
+
+    merge_candidates_dict["cluster_names"] = pair_cluster_index_2_coord_name
+    for cluster_id in list(merge_candidates_dict["all_cluster_links"].keys()):
+        if cluster_id in merge_candidates_dict["cluster_names"]:
+            merge_candidates_dict["all_cluster_links"][f"{cluster_id}__{merge_candidates_dict['cluster_names'][cluster_id]}"] = merge_candidates_dict["all_cluster_links"].pop(cluster_id)
+
+    coord_txs_named = copy.deepcopy(coord_txs)
+    for coord_id in pair_cluster_index_2_coord_name.keys():
+        if coord_id in coord_txs_named:
+            coord_txs_named[pair_cluster_index_2_coord_name[coord_id]] = coord_txs_named.pop(coord_id)
+    coord_txs_named_sorted = {}
+    for coord_id in coord_txs_named.keys():
+        without_date_sorted = [txid for txid in coord_txs_named[coord_id] if txid not in cjtxs.keys()]
+        with_date = [txid for txid in coord_txs_named[coord_id] if txid in cjtxs.keys()]
+        with_date_sorted = sorted(with_date, key=lambda x: cjtxs[x]['broadcast_time'])
+        coord_txs_named_sorted[coord_id] = without_date_sorted + with_date_sorted
+
+    # Add all not attributed transactions (coord not in named_coords)
+    all_attributed = [txid for coord_id in coord_txs_named_sorted for txid in coord_txs_named_sorted[coord_id] if coord_id in named_coords]
+    unattributed = [txid for txid in cjtxs.keys() if txid not in all_attributed]
+    coord_txs_named_sorted['unattributed'] = sorted(unattributed, key=lambda x: cjtxs[x]['broadcast_time'])
+
+    PRINT_FINAL = False
+    if PRINT_FINAL:
+        print_coordinators_counts(coord_txs_named, 2)
+        coord_txs_filtered = {coord_id: coord_txs_named[coord_id] for coord_id in coord_txs_named.keys() if
+                              len(coord_txs_named[coord_id]) >= MIN_COORD_CJTXS}
+        #print(coord_txs_filtered)
+        print(f'# Total non-small coordinators (min={MIN_COORD_CJTXS}): {len(coord_txs_filtered)}')
+
+    return merge_candidates_dict, coord_txs, coord_txs_named, coord_txs_named_sorted
+
+
+def wasabi_detect_coordinators(mix_id: str, protocol: MIX_PROTOCOL, target_path):
+    """
+    Detect propagation of remix outputs to identify separate coordinators. Is based on the assumption,
+    that coinjoins under same coordinator will have majority of remixed inputs from/to the same coordinator.
+    The method iteratively places coinjoin transaction into a cluster based on cluster of a majority of inputs/outputs,
+    combined with list of know ground truth mappings between transactions and known coordinators ('txid_coord.json').
+    The method is not fully automatic as outputs for a deceased coordinator typically join another coordinator eventually
+    and naive application of heuristic would results in overly aggresive merge of clusters (typically to a dominant one
+    at the times). Instead, candidate clusters are created and user analyst is expected to decide if ones not yet
+    attributed to specific coordinator are separate from known ones or not (see txid_coord_merge_candidates.json).
+    :param mix_id:
+    :param protocol:
+    :param target_path:
+    :return:
+    """
+    # Read, filter and sort coinjoin transactions
+    cjtxs = load_coinjoins_from_file(target_path, None, True)["coinjoins"]
+    ordering = compute_cjtxs_relative_ordering(cjtxs)
+    sorted_cjtxs = sorted(ordering, key=ordering.get)
+
+    # Load known coordinators (will be used as starting set to expand to additional transactions)
+    data = load_json_from_file(os.path.join(target_path, 'txid_coord.json'))  # Load known coordinators
+    ground_truth_known_coord_txs = {key:data[sublist][key] for sublist in data.keys() for key in data[sublist].keys()}
+
+    # Transform dictionary to {'coord': [cjtx]} format
+    transformed_dict = defaultdict(list)
+    for key, value in ground_truth_known_coord_txs.items():
+        transformed_dict[value].append(key)
+    initial_known_txs = dict(transformed_dict)
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_t.json'), initial_known_txs)  # Save transformed version for easier human lookup
+
+    #
+    # Run core detection
+    #
+    merge_candidates_dict, coord_txs_unnamed, coord_txs_named, coord_txs_named_sorted = run_coordinator_detection(
+        cjtxs, sorted_cjtxs, ground_truth_known_coord_txs, initial_known_txs
+    )
+
+    # Save results
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered.json'), coord_txs_unnamed)
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_merge_candidates.json'), merge_candidates_dict)
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_coord_discovered_renamed.json'), coord_txs_named_sorted)
+
+    tx_to_coord_map = {txid:coord for coord in coord_txs_named.keys() for txid in coord_txs_named[coord]}
+    save_json_to_file_pretty(os.path.join(target_path, 'txid_to_coord_discovered_renamed.json'), tx_to_coord_map)
+
+
+def get_missing_cjtxs(cjtxs: dict, mappings: dict, dataset_names: list, target_path: str | Path):
+    # Extract and save txids for transactions included in mappings, but not in cjtxs
+    crawl_coord_txs = {txid: None for dataset, txs in mappings.items() if dataset in dataset_names for txid in txs}
+    missing_crawl = {txid: None for txid in cjtxs['coinjoins'] if
+                     cjtxs['coinjoins'][txid]['broadcast_time'] > '2024-06-01' and txid not in crawl_coord_txs}
+    missing_cjtxs = {txid: None for txid in crawl_coord_txs if txid not in cjtxs['coinjoins']}
+
+    SM.print(f'Missing in crawl: {len(missing_crawl)}, in cjtxs: {len(missing_cjtxs)}')
+
+    save_json_to_file(os.path.join(target_path, 'missing_cjtxs_from_crawl.json'),
+                          list(missing_crawl.keys()))
+    save_json_to_file(os.path.join(target_path, 'missing_cjtxs_from_dumplings.json'),
+                          list(missing_cjtxs.keys()))
+
+    return missing_cjtxs, missing_crawl
+
 
