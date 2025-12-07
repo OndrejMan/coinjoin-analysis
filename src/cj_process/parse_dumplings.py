@@ -3000,9 +3000,9 @@ def restore_false_positives_for_others(target_path: str):
 #     return data
 
 
-def append_to_file(message: str, log_file: str | Path):
+def write_to_file(message: str, log_file: str | Path, mode: str):
     print(message, end="")
-    with open(log_file, "a", encoding="utf-8") as f:
+    with open(log_file, mode, encoding="utf-8") as f:
         f.write(message)
 
 
@@ -3032,7 +3032,11 @@ def main(argv=None):
     log_file = os.path.join(Path(op.target_base_path).parent, "summary.log")
     cmd_str = subprocess.list2cmdline(sys.argv)
     message = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {cmd_str}\n"
-    append_to_file(message, log_file)
+    write_to_file(message, log_file, 'a')
+
+    operation_file = os.path.join(Path(op.target_base_path).parent, "operation.txt")
+    write_to_file(cmd_str, operation_file, 'w')
+
     script_start_time = time.time()
 
     # WARNING: SW 100k pool does not match exactly mix_stay and active liqudity at the end - likely reason are neglected mining fees
@@ -3308,6 +3312,7 @@ def main(argv=None):
             # Split zkSNACKs (-> wasabi2_zksnacks) and post-zkSNACKs (-> wasabi2_others) pools
             # This splitting will allow to analyze separate pools, but also to make data files smaller and easier to process later
             logging.info('Going to wasabi2_extract_pools() *****************************')
+            write_to_file(f'{cmd_str} wasabi2_extract_pools', operation_file, 'w')
             split_pool_info = wasabi2_extract_pools_destroys_data(data, target_path, op.interval_start_date, op.interval_stop_date)
             logging.info('done wasabi2_extract_pools() *****************************')
             free_memory(data)
@@ -3317,10 +3322,12 @@ def main(argv=None):
 
             # WW2 needs additional treatment - detect and fix origin of WW1 inflows as friends
             # Do first separated pools, then the original (large) unseparated one
+            write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1', operation_file, 'w')
             for pool_name in mix_ids:
                 fix_ww2_for_fdnp_ww1(pool_name, target_path)
 
             for pool_name in mix_ids:
+                write_to_file(f'{cmd_str} process_and_save_intervals_filter({pool_name}', operation_file, 'w')
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 pool_interval_start_date = split_pool_info[pool_name]['start_date']
                 if op.interval_start_date != "" and pool_interval_start_date < op.interval_start_date:
@@ -3337,16 +3344,19 @@ def main(argv=None):
 
             # Fix the large aggregate file (may crash due to huge memory requirements)
             # Precaution: Let's streamline large dictionary first and save
+            write_to_file(f'{cmd_str} streamline_coinjoins_structure({pool_name}', operation_file, 'w')
             ww2_data = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), None, False)
             als.streamline_coinjoins_structure(ww2_data)
             als.save_json_to_file(os.path.join(target_path, 'wasabi2', 'coinjoin_tx_info.json'), ww2_data)
             del ww2_data
 
             logging.info(f'Going to fix_ww2_for_fdnp_ww1(wasabi2) *****************************')
+            write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1(wasabi2)', operation_file, 'w')
             fix_ww2_for_fdnp_ww1('wasabi2', target_path)
             logging.info(f'done fix_ww2_for_fdnp_ww1(wasabi2) *****************************')
             logging.info(f'Going to process_and_save_intervals_filter(wasabi2) *****************************')
             interval_start_date = '2022-06-01 00:00:07.000' if op.interval_start_date == "" else op.interval_start_date
+            write_to_file(f'{cmd_str} process_and_save_intervals_filter(wasabi2)', operation_file, 'w')
             process_and_save_intervals_filter('wasabi2', MIX_PROTOCOL.WASABI2, target_path, interval_start_date, op.interval_stop_date,
                                        'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None, op.SAVE_BASE_FILES_JSON, True)
             logging.info(f'done process_and_save_intervals_filter(wasabi2) *****************************')
@@ -3454,9 +3464,11 @@ def main(argv=None):
                                "opencoordinator", "dragonordnance", "wasabist", "strange_2025", "unknown_2024_e85631", "unknown_2024_28ce7b"]
             # Force MIX_IDS subset if required
             selected_coords = selected_coords_default if op.MIX_IDS == "" else op.MIX_IDS
-
+            write_to_file(f'{cmd_str} wasabi2_extract_other_pools', operation_file, 'w')
             split_pool_info = wasabi2_extract_other_pools(selected_coords, data, target_path, op.interval_stop_date, coord_tx_mapping)
+
             # Perform splitting into month intervals for all processed coordinators
+            write_to_file(f'{cmd_str} split_pools', operation_file, 'w')
             for pool_name in split_pool_info.keys():
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 pool_data = process_and_save_intervals_filter(pool_name, MIX_PROTOCOL.WASABI2, target_path,
