@@ -3116,7 +3116,7 @@ def main(argv=None):
         # Load all ww2 coinjoins
         # Load all coords cjtxs
         # Compute difference and print len and txs
-        cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), True, None)
+        cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), None, True)
         crawl_coord_txs = als.load_coordinator_mapping_from_file(os.path.join(target_path, 'wasabi2', 'txid_coord.json'), 'crawl')
 
         missing_crawl = {txid: None for txid in cjtxs['coinjoins'] if cjtxs['coinjoins'][txid]['broadcast_time'] > '2024-06-01'
