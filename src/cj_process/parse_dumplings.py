@@ -23,7 +23,7 @@ from cj_process.cj_analysis import get_output_name_string, get_input_name_string
 from cj_process import cj_analysis as als
 from cj_process import cj_consts as cjc
 from cj_process import cj_assesment as cja
-import cj_process.cj_visualize as cjvis
+from cj_process import cj_visualize as cjvis
 import argparse
 import gc
 import time
@@ -3669,7 +3669,7 @@ def main(argv=None):
 
     if op.ANALYSIS_WALLET_PREDICTION_EXT:
         if op.CJ_TYPE == CoinjoinType.WW2:
-            #cja.analyze_impact_session_tx_removed_predictions(op, target_path)
+            cja.analyze_impact_session_tx_removed_predictions(op, target_path)
             cja.analyze_impact_session_tx_removed_predictions2(op, target_path)
 
 
@@ -3731,26 +3731,30 @@ def main(argv=None):
     if op.ANALYZE_DETECT_COORDINATORS_ALG_DETAILED:
         if op.CJ_TYPE == CoinjoinType.WW2:
             # Drop fraction of trailing transactions from ground truth attribution
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.TAIL),
-            #     'coord_discovery_analysis___drop__tail')
             cja.wasabi_detect_coordinators_evaluation_parallel(
                 os.path.join(target_path, 'wasabi2_others'),
                 cja._eval_drop_attributions_single_coord,
-                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
-                'coord_discovery_analysis___drop__front')
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.TAIL),
+                'coord_discovery_analysis___drop__tail')
+
+            cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__tail', 'tail, single coordinator', omitt_coords, True, False)
+
+            # cja.wasabi_detect_coordinators_evaluation_parallel(
+            #     os.path.join(target_path, 'wasabi2_others'),
+            #     cja._eval_drop_attributions_single_coord,
+            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
+            #     'coord_discovery_analysis___drop__front')
 
             # Drop random transactions from ground truth attribution of any coordinator
             # Note: As we are dropping from any coordinator, then every coordinator tested in parallel
             #       is one independent try => if we repeat 10x => we made 10x len(coords) evaluations
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(1, 101, 1)), list(range(0, 1)),
-            #                                      cja.DROP_TYPE.RANDOM_ANY),
-            #     'coord_discovery_analysis___drop__randomany')
+            cja.wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'),
+                cja._eval_drop_attributions_single_coord,
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(1, 101, 1)), list(range(0, 1)),
+                                                 cja.DROP_TYPE.RANDOM_ANY),
+                'coord_discovery_analysis___drop__randomany')
+            cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany', 'random, any coordinator', omitt_coords, True, True)
 
             # cja.wasabi_detect_coordinators_evaluation_parallel(
             #     os.path.join(target_path, 'wasabi2_others'),
@@ -3758,11 +3762,12 @@ def main(argv=None):
             #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 2)), cja.DROP_TYPE.RANDOM_ANY),
             #     'coord_discovery_analysis___drop__randomany')
 
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 10)), cja.DROP_TYPE.RANDOM_SINGLE),
-            #     'coord_discovery_analysis___drop__randomsingle')
+            cja.wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'),
+                cja._eval_drop_attributions_single_coord,
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 10)), cja.DROP_TYPE.RANDOM_SINGLE),
+                'coord_discovery_analysis___drop__randomsingle')
+            cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomsingle', 'random, single coordinator', omitt_coords, True, False)
 
             # Analyze impact of threshold for intermix attributions
             # cja.wasabi_detect_coordinators_evaluation_parallel(
