@@ -11,9 +11,9 @@ echo "###############################################" >> $BASE_PATH/btc/summary
 # Extract Dumplings results
 #
 # Remove previous temporary directory
-rm -rf $TMP_DIR/
+rm -rf $TMP_DIR/Scanner
 # Create new temporary directory
-mkdir $TMP_DIR/
+mkdir $TMP_DIR/Scanner
 # Unzip processed dumplings files
 #unzip $BASE_PATH/btc/dumplings.zip -d $TMP_DIR/
 unzip $BASE_PATH/dumplings.zip -d $TMP_DIR/
@@ -115,7 +115,7 @@ for pool in others kruw gingerwallet opencoordinator coinjoin_nl wasabicoordinat
     pool_PATH="$DEST_DIR/Scanner/wasabi2_$pool/wasabi2_${pool}_cummul_values_norm.png"
     image_list="$image_list $pool_PATH"
 done
-montage $image_list -tile 2x -geometry +2+2 $DEST_DIR/Scanner/wasabi2/wasabi2_tiles_all_cummul_values_norm.png
+montage $image_list -tile 2x -geometry +2+2 $DEST_DIR/Scanner/wasabi2/wasabi2_all_cummul_values_norm_tiles.png
 
 # Ashigaru + JoinMarket
 image_list=""
@@ -155,7 +155,7 @@ for pool in others kruw gingerwallet opencoordinator coinjoin_nl; do
     image_list+=("$DEST_DIR/Scanner/wasabi2_$pool/wasabi2_${pool}_cummul_values_norm.png")
 done
 
-montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_tiles_all_cummul_values_norm.png
+montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_all_cummul_values_norm_tiles.png
 
 # Last months of selected pools
 image_list=()
@@ -169,16 +169,16 @@ montage "${image_list[@]}" \
   -geometry 1600x1600+2+2 \
   -tile 3x \
   -strip -define png:compression-level=9 \
-  "$DEST_DIR/Scanner/summary2_tiles_all_cummul_values_norm.png"
+  "$DEST_DIR/Scanner/summary2_all_cummul_values_norm_tiles.png"
 
 
 # all wasabi2 pools
 image_list=()
-for pool in others kruw gingerwallet opencoordinator coinjoin_nl wasabicoordinator wasabist mega btip unknown_2024; do
+for pool in others kruw gingerwallet opencoordinator coinjoin_nl wasabicoordinator wasabist mega btip unknown_2024_e85631 unknown_2024_28ce7b; do
     image_list+=("$DEST_DIR/Scanner/wasabi2_$pool/wasabi2_${pool}_cummul_values_norm.png")
 done
 
-montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_tiles_ww2_cummul_values_norm.png
+montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_ww2_cummul_values_norm_tiles.png
 
 
 #
@@ -186,6 +186,6 @@ montage "${image_list[@]}" -tile 2x -geometry +2+2 $DEST_DIR/Scanner/summary_til
 #
 $BASE_PATH/btc/coinjoin-analysis/scripts/upload_results.sh
 
-echo "###############################################" >> $BASE_PATH/btc/summary.log
 
+echo "###############################################" >> $BASE_PATH/btc/summary.log
 
