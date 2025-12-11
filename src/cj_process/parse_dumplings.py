@@ -3817,7 +3817,7 @@ def main(argv=None):
 
     elapsed = time.time() - script_start_time
     end_msg = f"  SUCCESS (elapsed: {elapsed:.2f} seconds)\n"
-    append_to_file(end_msg, log_file)
+    write_to_file(end_msg, log_file, 'a')
 
     return 0
 
