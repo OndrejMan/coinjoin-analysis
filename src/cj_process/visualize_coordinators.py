@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 from collections import defaultdict
 from itertools import groupby
 
@@ -96,7 +97,7 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
                                  f" [{'all coinjoins' if start_date is None else 'coinjoins after ' + start_date}]", font_size=10)
     print(f"Sankey diagram updated")
     #fig.show()  # BUGBUG: this call hangs # This ensures the renderer is initialized before saving
-    fig.write_html(f'{output_file_template}.html', auto_open=True)
+    fig.write_html(f'{output_file_template}.html', auto_open=False)
     print(f"Sankey diagram shown")
     # fig.to_html(os.path.join(base_path, f'{output_file_template}.html'))
     # print(f"Sankey diagram to html saved")
@@ -114,7 +115,7 @@ def visualize_coord_flows(base_path: str):
     with open(load_path, "r") as file:
         data = orjson.loads(file.read())
 
-    ADD_ZKSNACKS = False
+    ADD_ZKSNACKS = True
     if ADD_ZKSNACKS:
         load_path = os.path.join(base_path, 'Scanner', "wasabi2_zksnacks", 'coinjoin_tx_info.json')
         with open(load_path, "r") as file:
@@ -378,11 +379,15 @@ def compute_reorder_stats(base_path: str):
 
 
 if __name__ == "__main__":
-    base_path = 'c:/!blockchains/CoinJoin/Dumplings_Stats_20250820/'
-    base_path = '/home/xsvenda/btc/dumplings_temp2/Scanner/'
+    if len(sys.argv) > 1:
+        base_path = sys.argv[1]
+    else:
+        print('No target path provided')
+        exit(1)
 
+    print(f'Processing path {base_path}')
     #compute_reorder_stats(base_path)
-    gant_coordinators_plotly(base_path)
-    #visualize_coord_flows(base_path)
+    #gant_coordinators_plotly(base_path)
+    visualize_coord_flows(base_path)
 
 
