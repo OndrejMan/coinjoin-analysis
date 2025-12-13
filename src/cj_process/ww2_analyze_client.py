@@ -136,11 +136,12 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
                 linewidth=float(smoothed_widths[i])  # Use raw number of lists for thickness
             )
 
-    FONT_SIZE = '9'
+    FONT_SIZE = '14'
+    FONT_SIZE_SMALLER = '11'
     #ax.legend(loc="upper left", fontsize=FONT_SIZE)
-    ax.legend(loc="best", fontsize=FONT_SIZE)
+    ax.legend(loc="best", fontsize='10')
     #ax.set_title(f'{title}; total_sessions={total_sessions}')
-    ax.set_title(f'{title}', fontsize=FONT_SIZE)
+    ax.set_title(f'{title}', fontsize=FONT_SIZE_SMALLER)
     ax.set_xlabel('Number of coinjoins executed', fontsize=FONT_SIZE)
     ax.set_ylabel(y_label, fontsize=FONT_SIZE)
     #plt.show()
