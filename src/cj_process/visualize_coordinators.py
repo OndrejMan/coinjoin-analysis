@@ -54,6 +54,11 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
                                     flows_only_inter[key] = flows_only_inter.get(key, 0) + output_data.get("value", 0)
         print('... done')
 
+    flows_to_save = {}
+    for (k1, k2), v in flows_only_inter.items():
+        flows_to_save.setdefault(k1, {})[k2] = v
+    als.save_json_to_file_pretty(os.path.join(base_path, f"{output_file_template}.json"), flows_to_save)
+
     if not counts:
         flows_only_inter_btc = {key: round(flows_only_inter[key] / SATS_IN_BTC, 1) for key in flows_only_inter.keys()}
         flows = flows_only_inter_btc
@@ -61,8 +66,8 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
         #flows = flows_all
         flows = flows_only_inter
 
-    print(f"Inter-coordinators flows ({'counts' if counts else 'values'}): {flows}")
-    #als.save_json_to_file_pretty(f'{output_file_template}.json', flows)
+    type_str = 'counts' if counts else 'values'
+    print(f"Inter-coordinators flows ({type_str}): {flows}")
 
     sources, targets, values = zip(
         *[(entity_index[src], entity_index[tgt], val) for (src, tgt), val in flows.items()]) if flows else ([], [], [])
@@ -91,13 +96,14 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
         )
     ))
     fig.update_layout(
-        font=dict(size=18)  # This affects all text in the Sankey diagram
+        #font=dict(size=18)  # This affects all text in the Sankey diagram
+        font = dict(size=38)  # This affects all text in the Sankey diagram
     )
     fig.update_layout(title_text=f"Inter-coordinators flows for Wasabi 2.x ({'output counts' if counts else 'output values'})"
-                                 f" [{'all coinjoins' if start_date is None else 'coinjoins after ' + start_date}]", font_size=10)
+                                 f" [{'all coinjoins' if start_date is None else 'coinjoins after ' + start_date}]", font_size=18)
     print(f"Sankey diagram updated")
     #fig.show()  # BUGBUG: this call hangs # This ensures the renderer is initialized before saving
-    fig.write_html(f'{output_file_template}.html', auto_open=False)
+    fig.write_html(f"{os.path.join(base_path, f'{output_file_template}.html')}", auto_open=False)
     print(f"Sankey diagram shown")
     # fig.to_html(os.path.join(base_path, f'{output_file_template}.html'))
     # print(f"Sankey diagram to html saved")
