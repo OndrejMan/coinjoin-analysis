@@ -2579,6 +2579,7 @@ class DumplingsParseOptions:
 
     ANALYSIS_PROCESS_ALL_COINJOINS_INTERVALS = False
     DETECT_FALSE_POSITIVES = False
+    EXTRACT_TEMPORARY_FALSE_POSITIVES = False
     RESTORE_FALSE_POSITIVES_FOR_OTHERS = False
     PLOT_REMIXES = False
     PLOT_REMIXES_SINGLE_INTERVAL = False
@@ -2683,6 +2684,7 @@ class DumplingsParseOptions:
         self.SAVE_BASE_FILES_JSON = True
         self.ANALYSIS_PROCESS_ALL_COINJOINS_INTERVALS = False
         self.DETECT_FALSE_POSITIVES = False
+        self.EXTRACT_TEMPORARY_FALSE_POSITIVES = False
         self.RESTORE_FALSE_POSITIVES_FOR_OTHERS = False
         self.PLOT_REMIXES = False
         self.PLOT_REMIXES_SINGLE_INTERVAL = False   # If True, separate standalone graph is generated for each interval
@@ -3413,6 +3415,7 @@ def main(argv=None):
                 if os.path.exists(target_base_path):
                     # Run false detection
                     data = wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
+
                     # If available, add extended information about coordinator etc.
                     no_remix_all_ext = als.load_json_from_file(os.path.join(target_base_path, 'no_remix_txs.json'))
                     tx_2_coord_map_path = os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json')
@@ -3442,6 +3445,32 @@ def main(argv=None):
                     wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
                 else:
                     logging.warning(f'DETECT_FALSE_POSITIVES: path {target_base_path} does not exist')
+
+    if op.EXTRACT_TEMPORARY_FALSE_POSITIVES:
+        # Extract temporary false positives into specific file 'false_cjtxs.json.temp' for potential usage in
+        # Expects 'no_remix_txs.json' file to be already created, run DETECT_FALSE_POSITIVES before this operation
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            FP_HITS_TO_TEMPORARY = ['recent__stdenom_rbf_notap_onechange', 'recent__both_reuse']
+            mix_ids = ['wasabi2'] if op.MIX_IDS == "" else op.MIX_IDS
+            for mix_id in mix_ids:
+                target_base_path = os.path.join(target_path, mix_id)
+                target_fp_file = os.path.join(target_base_path, f'no_remix_txs.json')
+                if os.path.exists(target_fp_file):
+                    logging.info(f'Going to process : {target_fp_file}')
+                    candidate_fp = als.load_json_from_file(target_fp_file)
+                    # Filter sections only to ones specified by FP_HITS_TO_TEMPORARY
+                    for section in list(candidate_fp.keys()):
+                        if section not in FP_HITS_TO_TEMPORARY:
+                            candidate_fp.pop(section)
+                    # Transform into format used by false_cjtxs.json
+                    fp_txs_temp = {section: list(candidate_fp[section].keys()) for section in candidate_fp.keys()}
+                    target_fp_file_temp = os.path.join(target_base_path, f'false_cjtxs.json.brief')
+                    als.save_json_to_file_pretty(target_fp_file_temp, fp_txs_temp)
+                    total_candidate_txs = sum([len(fp_txs_temp[section]) for section in fp_txs_temp.keys()])
+                    SM.print(f'Total {total_candidate_txs} txs saved into {target_fp_file_temp} using {FP_HITS_TO_TEMPORARY} mask')
+                else:
+                    SM.print(f'{target_fp_file} is missing, no action')
+
 
     if op.RESTORE_FALSE_POSITIVES_FOR_OTHERS:
         restore_false_positives_for_others(target_path)
