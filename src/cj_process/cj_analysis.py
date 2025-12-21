@@ -1266,7 +1266,32 @@ def load_coinjoins_from_file_sqlite(target_load_path: str, false_cjtxs: dict, fi
     return data
 
 
+def load_false_cjtxs(base_path: Path):
+    """
+    Loads false positives transactions from all files with 'false_cjtxs.json.*' format,
+    then merge together
+    :param base_path: path where to search for 'false_cjtxs.json.*' files
+    :return: list of false positives transactions
+    """
+    false_cjtxs = []
+    # Add original file 'false_cjtxs.json'
+    fp_files = [os.path.join(base_path, 'false_cjtxs.json')]
+    # List all files with 'false_cjtxs.json.*' format and merge
+    fp_files.extend(list(Path(base_path).glob('false_cjtxs.json.*')))
+    for fp_file in fp_files:
+        logging.debug(f"Reading false positives from file {fp_file}")
+        false_cjtxs.extend(load_false_cjtxs_from_file(fp_file))
+
+    return false_cjtxs
+
+
 def load_false_cjtxs_from_file(fp_file):
+    """
+    Loads all false positive transactions from structured json (section->list of false cjtxs),
+    then merge it together.
+    :param fp_file: target file with false positives
+    :return:
+    """
     data = load_json_from_file(fp_file)
     false_cjtxs = [item for sublist in data.values() for item in sublist]
     if PERF_USE_SHORT_TXID:
@@ -1307,7 +1332,7 @@ def load_coinjoins_from_file(target_load_path: str | Path, false_cjtxs: dict | N
         if not filtered_false_coinjoins:
             filtered_false_coinjoins = {}
         if false_cjtxs is None:
-            false_cjtxs = load_false_cjtxs_from_file(os.path.join(target_load_path, 'false_cjtxs.json'))
+            false_cjtxs = load_false_cjtxs(target_load_path)
         for false_tx in false_cjtxs:
             if false_tx in data['coinjoins'].keys():
                 # Remove false transaction and place it into separate list (if provided)

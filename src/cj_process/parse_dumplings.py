@@ -1563,7 +1563,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
 
     print(f'Going to process the following subfolders of {target_path}: {files}')
     # Load false positives
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_path)
     SM.print(f'Number of false positives initially (false_cjtxs.json): {len(set(false_cjtxs))}')
 
     # Detected false positives candidates. 3m_xxx contains subset of txs from last 3 months.
@@ -2391,7 +2391,7 @@ def analyze_zksnacks_output_clusters(mix_id, target_path):
 def visualize_interval(mix_id: str, target_save_path: str, last_stop_date_str: str, current_stop_date_str: str):
     logging.info(f'Processing interval {last_stop_date_str} - {current_stop_date_str}')
 
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_save_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_save_path)
 
     interval_path = os.path.join(target_save_path, f'{last_stop_date_str.replace(":", "-")}--{current_stop_date_str.replace(":", "-")}_unknown-static-100-1utxo')
     assert os.path.exists(interval_path), f'{interval_path} does not exist'
@@ -2410,7 +2410,7 @@ def visualize_intervals(mix_id: str, target_path: os.path, start_date: str, stop
     if not os.path.exists(target_save_path):
         os.makedirs(target_save_path.replace('\\', '/'))
 
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_save_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_save_path)
 
     # Visualize all data
     interval_data = als.load_coinjoins_from_file(target_save_path, false_cjtxs, True)
