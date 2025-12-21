@@ -38,13 +38,17 @@ python3 -m cj_process.parse_dumplings --cjtype ww2 --target-path $TMP_DIR/ --env
 
 # Run false positives detection
 python3 -m cj_process.parse_dumplings --cjtype ww2 --action detect_false_positives --env_vars "MIX_IDS=['wasabi2']" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+# Extract 'certain' false positives from newly detected ones
+python3 -m cj_process.parse_dumplings --cjtype ww2 --env_vars "EXTRACT_TEMPORARY_FALSE_POSITIVES=True" --target-path $TMP_DIR/
+
 
 # Run split of post-zksnacks coordinators
 python3 -m cj_process.parse_dumplings --cjtype ww2 --action split_coordinators --target-path $TMP_DIR/ | tee parse_dumplings.py.log
-# Copy fee rates into newly created folders (selected ones)
+# Copy fee rates and false positives into newly created folders (selected ones)
 for dir in kruw gingerwallet opencoordinator wasabicoordinator coinjoin_nl wasabist dragonordnance mega btip strange_2025 unknown_2024_e85631 unknown_2024_28ce7b; do
     cp $TMP_DIR/Scanner/wasabi2/fee_rates.json $TMP_DIR/Scanner/wasabi2_$dir/
     cp $TMP_DIR/Scanner/wasabi2/false_cjtxs.json $TMP_DIR/Scanner/wasabi2_$dir/
+    cp $TMP_DIR/Scanner/wasabi2/false_cjtxs.json.brief $TMP_DIR/Scanner/wasabi2_$dir/
 done
 
 # Extract TX flags
