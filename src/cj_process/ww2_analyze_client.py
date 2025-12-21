@@ -3,13 +3,14 @@ import logging
 import math
 import os
 from itertools import chain
+from pathlib import Path
+
 import seaborn as sns
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import CubicSpline
 from typing import Iterable, Dict, Tuple, List
 
-import parse_dumplings as dmp
 import cj_analysis as als
 from collections import defaultdict
 
@@ -164,7 +165,7 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
         #plt.show()
 
 
-def get_session_label(mix_name: str, session_size_inputs: int, segment: list, session_funding_tx: dict) -> str:
+def get_session_label(mix_name: str, session_size_inputs: int, segment: dict, session_funding_tx: dict) -> str:
     # Two options for session label
     cjsession_label_short_date = f'{mix_name} {round(session_size_inputs / SATS_IN_BTC, 1)}btc | {len(segment)} cjs | ' + \
                                  session_funding_tx['broadcast_time'] + ' ' + session_funding_tx['txid'][0:8]
@@ -230,153 +231,8 @@ def find_input_index_for_output(coinjoins: dict, prev_txid: str, prev_vout_index
     return spending_index
 
 
-def analyze_multisession_mix_experiments(target_base_path: str, mix_name: str, target_as: int, experiment_start_date: str):
-    target_path = os.path.join(target_base_path, f'{mix_name}_history.json')
-    history_all = als.load_json_from_file(target_path)['result']
-    target_path = os.path.join(target_base_path, f'{mix_name}_coins.json')
-    coins = als.load_json_from_file(target_path)['result']
 
-    # After each merge, anonymity score for merge transaction is set to 1 for all inputs.
-    # Search older *_coins.json files and try to find one before experiment coins merge
-    intermediate_coins_max_score = find_highest_scores(target_base_path, mix_name)
-    for coin in coins:
-        if coin['anonymityScore'] == 1:
-            coin['anonymityScore'] = intermediate_coins_max_score[coin['address']] if coin['address'] in intermediate_coins_max_score else 1
-
-    target_path = os.path.join(target_base_path, f'coinjoin_tx_info.json')
-    coinjoins_all = als.load_json_from_file(target_path)
-    coinjoins = coinjoins_all['coinjoins']
-    # target_path = os.path.join(target_base_path, f'logww2.json')
-    # coord_logs = als.load_json_from_file(target_path)
-
-    # Filter all items from history older than experiment start date
-    history = [tx for tx in history_all if tx['datetime'] >= experiment_start_date]
-
-    # Pair wallet coins to transactions from wallet history
-    for cjtx in history:
-        if 'outputs' not in cjtx.keys():
-            cjtx['outputs'] = {}
-        if 'inputs' not in cjtx.keys():
-            cjtx['inputs'] = {}
-        for coin in coins:
-            if coin['txid'] == cjtx['tx']:
-                cjtx['outputs'][str(coin['index'])] = coin
-            if coin['spentBy'] == cjtx['tx']:
-                # We do not know correct vin index - need to search for in subsequent transaction
-                input_index = find_input_index_for_output(coinjoins_all, coin['txid'], str(coin['index']), coin['amount'], coin['spentBy'])
-                cjtx['inputs'][str(input_index)] = coin
-
-    # If last tx is coinjoin, add one artificial non-coinjoin one
-    if history[-1]['islikelycoinjoin'] is True:
-        artificial_end = copy.deepcopy(history[-1])
-        artificial_end['islikelycoinjoin'] = False
-        artificial_end['tx'] = '0000000000000000000000000000000000000000000000000000000000000000'
-        artificial_end['label'] = 'artificial end merge'
-        history.append(artificial_end)
-
-    #
-    # Detect separate coinjoin sessions and split based on them.
-    # Assumption: 1 non-coinjoin tx followed by one or more coinjoin session, finished again with non-coinjoin tx
-    #
-    cjtxs = {'sessions': {}}
-    session_cjtxs = {}
-    session_size_inputs = 0
-    for index in range(0, len(history)):
-        tx = history[index]
-        if tx['islikelycoinjoin'] is True:
-            txid = tx['tx']
-            # Inside coinjoin session, append
-            record = {'txid': tx['tx'], 'inputs': {}, 'outputs': {}, 'round_id': tx['tx'], 'is_blame_round': False}
-            record['round_start_time'] = als.precomp_datetime.fromisoformat(tx['datetime']).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            record['broadcast_time'] = als.precomp_datetime.fromisoformat(tx['datetime']).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-
-            record['inputs'] = {}
-            for index in tx['inputs']:
-                record['inputs'][index] = {}
-                record['inputs'][index]['index'] = index
-                record['inputs'][index]['address'] = tx['inputs'][index]['address']
-                record['inputs'][index]['value'] = tx['inputs'][index]['amount']
-                record['inputs'][index]['wallet_name'] = mix_name
-                record['inputs'][index]['anon_score'] = tx['inputs'][index]['anonymityScore']
-
-            record['outputs'] = {}
-            for index in tx['outputs']:  # For outputs, index is correct value in this coinjoin cjtx
-                record['outputs'][index] = {}
-                record['outputs'][index]['index'] = index
-                record['outputs'][index]['address'] = tx['outputs'][index]['address']
-                record['outputs'][index]['value'] = tx['outputs'][index]['amount']
-                record['outputs'][index]['wallet_name'] = mix_name
-                record['outputs'][index]['anon_score'] = tx['outputs'][index]['anonymityScore']
-
-            # Try to load full serialized tx (if available) and extract additional info
-            tx_file_path = os.path.join(target_base_path, 'data', f'{tx['tx']}.json')
-            if os.path.exists(tx_file_path):
-                tx_hex = als.load_json_from_file(tx_file_path)['result']
-                # Compute total mining fee paid (sum(inputs) - sum(outputs))
-                inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in coinjoins[txid]['inputs'].keys()])
-                outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in coinjoins[txid]['outputs'].keys()])
-                total_mining_fee = inputs_sum - outputs_sum
-                # Compute vsize for "our" inputs and outputs out of whole transaction => our share of mining fees
-                wallet_inputs = [int(record['inputs'][item]['index']) for item in record['inputs'].keys()]
-                wallet_outputs = [int(record['outputs'][item]['index']) for item in record['outputs'].keys()]
-                wallet_vsize, total_vsize = als.compute_partial_vsize(tx_hex['hex'], wallet_inputs, wallet_outputs)
-                # Fee rate paid for whole transaction
-                fee_rate = total_mining_fee / total_vsize
-                # Mining fee rate to pay fair share for our inputs and outputs
-                wallet_fair_mfee_sats = math.ceil(wallet_vsize * fee_rate)
-                wallet_inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in record['inputs'].keys()])
-                wallet_outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in record['outputs'].keys()])
-                wallet_fee_paid_sats = wallet_inputs_sum - wallet_outputs_sum
-                #assert tx['amount'] == -wallet_fee_paid_sats, f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}"
-                if tx['amount'] != -wallet_fee_paid_sats:
-                    logging.error(f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}")
-                    logging.debug(f"Inputs: ")
-                    for index in record['inputs'].keys():
-                        logging.debug(f"  [{index}]: {coinjoins[txid]['inputs'][index]['value']} sats")
-                    logging.debug(f"Outputs: ")
-                    for index in record['outputs'].keys():
-                        logging.debug(f"  [{index}]: {coinjoins[txid]['outputs'][index]['value']} sats")
-                hidden_ctip = -tx['amount'] - wallet_fair_mfee_sats
-                if hidden_ctip < -10:
-                    logging.debug(f"Sligthly smaller hidden tip than expected: {hidden_ctip} sats")
-                assert hidden_ctip >= -100, f"Incorrect hidden tip of {hidden_ctip} sats"
-
-                record['total_mining_fee'] = total_mining_fee
-                record['mining_fee_rate'] = fee_rate
-                record['total_vsize'] = total_vsize
-                record['wallet_vsize'] = wallet_vsize
-                record['wallet_fair_mfee'] = wallet_fair_mfee_sats
-                record['wallet_fee_paid'] = -tx['amount']
-                record['wallet_hidden_ctip_paid'] = hidden_ctip
-            else:
-                logging.warning(f'{tx_file_path} is missing')
-            session_cjtxs[txid] = record
-        else:
-            # Non-coinjoin transaction detected (either initial funding one at the start of session, or start of of next session )
-            if len(session_cjtxs) > 0:
-                # We hit first non-coinjoin transaction after session => end of session
-                assert len(session_funding_tx[
-                               'outputs'].keys()) == 1, f'Funding tx {session_funding_tx['tx']} has unexpected number of outputs of {len(session_funding_tx['outputs'].keys())}'
-                norm_tx = {'txid': session_funding_tx['tx'], 'label': session_funding_tx['label'],
-                           'broadcast_time': session_funding_tx['datetime'],
-                           'value': session_funding_tx['outputs']['0']['amount']}
-                session_label = get_session_label(mix_name, session_size_inputs, session_cjtxs, norm_tx)
-                print(f'{session_label}: {session_size_inputs}')
-                als.remove_link_between_inputs_and_outputs(session_cjtxs)
-                als.compute_link_between_inputs_and_outputs(session_cjtxs, [cjtxid for cjtxid in session_cjtxs.keys()])
-
-                cjtxs['sessions'][session_label] = {'coinjoins': session_cjtxs, 'funding_tx': norm_tx}
-                session_cjtxs = {}
-                session_size_inputs = 0
-                session_funding_tx = None
-
-            # Non-coinjoin trasaction, potentially initial funding tx, then extract input liquidity into session_size_inputs
-            if len(tx['outputs']) == 1 and tx['outputs'][list(tx['outputs'].keys())[0]]['amount'] > 0:
-                #if tx['outputs'][list(tx['outputs'].keys())[0]]['amount'] > session_size_inputs:
-                session_size_inputs = tx['outputs'][list(tx['outputs'].keys())[0]]['amount']
-                session_funding_tx = tx
-
-
+def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str, target_as: int):
     # Compute basic statistics
     stats = {}
     stats['all_cjs_weight_anonscore'] = {}
@@ -600,7 +456,7 @@ def analyze_multisession_mix_experiments(target_base_path: str, mix_name: str, t
         stats['experiment_cost']['wallet_fair_mfee'] += sum(wallet_fairmfee_paid)
         stats['experiment_cost']['wallet_all_fee'] += sum(wallet_fee_paid)
 
-    print(f'\n{mix_name}: Total experiments: {len(cjtxs['sessions'])}, total txs={len(history)}, '
+    print(f'\n{mix_name}: Total experiments: {len(cjtxs['sessions'])}, '
           f'total coins: {sum([stats['num_coins'][session_label] for session_label in stats['num_coins'].keys()])}, '
           f'total overmixed coins: {sum([len([stats['num_overmixed_coins'][session_label] for session_label in stats['num_overmixed_coins'].keys()])])},'
           f"mining fee cost: {stats['experiment_cost']['wallet_fair_mfee']}, "
@@ -609,12 +465,172 @@ def analyze_multisession_mix_experiments(target_base_path: str, mix_name: str, t
 
     print("##################################################")
 
+    return stats
+
+
+def parse_sessions(target_base_path: str, mix_name: str, experiment_start_date: str, coinjoins_all: dict):
+    coinjoins = coinjoins_all['coinjoins']
+    target_path = os.path.join(target_base_path, f'{mix_name}_history.json')
+    history_all = als.load_json_from_file(target_path)['result']
+    target_path = os.path.join(target_base_path, f'{mix_name}_coins.json')
+    coins = als.load_json_from_file(target_path)['result']
+
+    # After each merge, anonymity score for merge transaction is set to 1 for all inputs.
+    # Search older *_coins.json files and try to find one before experiment coins merge
+    intermediate_coins_max_score = find_highest_scores(target_base_path, mix_name)
+    for coin in coins:
+        if coin['anonymityScore'] == 1:
+            coin['anonymityScore'] = intermediate_coins_max_score[coin['address']] if coin['address'] in intermediate_coins_max_score else 1
+
+    # target_path = os.path.join(target_base_path, f'logww2.json')
+    # coord_logs = als.load_json_from_file(target_path)
+
+    # Filter all items from history older than experiment start date
+    history = [tx for tx in history_all if tx['datetime'] >= experiment_start_date]
+
+    # Pair wallet coins to transactions from wallet history
+    for cjtx in history:
+        if 'outputs' not in cjtx.keys():
+            cjtx['outputs'] = {}
+        if 'inputs' not in cjtx.keys():
+            cjtx['inputs'] = {}
+        for coin in coins:
+            if coin['txid'] == cjtx['tx']:
+                cjtx['outputs'][str(coin['index'])] = coin
+            if coin['spentBy'] == cjtx['tx']:
+                # We do not know correct vin index - need to search for in subsequent transaction
+                input_index = find_input_index_for_output(coinjoins_all, coin['txid'], str(coin['index']), coin['amount'], coin['spentBy'])
+                cjtx['inputs'][str(input_index)] = coin
+
+    # If last tx is coinjoin, add one artificial non-coinjoin one
+    if history[-1]['islikelycoinjoin'] is True:
+        artificial_end = copy.deepcopy(history[-1])
+        artificial_end['islikelycoinjoin'] = False
+        artificial_end['tx'] = '0000000000000000000000000000000000000000000000000000000000000000'
+        artificial_end['label'] = 'artificial end merge'
+        history.append(artificial_end)
+
+    #
+    # Detect separate coinjoin sessions and split based on them.
+    # Assumption: 1 non-coinjoin tx followed by one or more coinjoin session, finished again with non-coinjoin tx
+    #
+    cjtxs = {'sessions': {}}
+    session_cjtxs = {}
+    session_size_inputs = 0
+    for index in range(0, len(history)):
+        tx = history[index]
+        if tx['islikelycoinjoin'] is True:
+            txid = tx['tx']
+            # Inside coinjoin session, append
+            record = {'txid': tx['tx'], 'inputs': {}, 'outputs': {}, 'round_id': tx['tx'], 'is_blame_round': False}
+            record['round_start_time'] = als.precomp_datetime.fromisoformat(tx['datetime']).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            record['broadcast_time'] = als.precomp_datetime.fromisoformat(tx['datetime']).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+            record['inputs'] = {}
+            for index in tx['inputs']:
+                record['inputs'][index] = {}
+                record['inputs'][index]['index'] = index
+                record['inputs'][index]['address'] = tx['inputs'][index]['address']
+                record['inputs'][index]['value'] = tx['inputs'][index]['amount']
+                record['inputs'][index]['wallet_name'] = mix_name
+                record['inputs'][index]['anon_score'] = tx['inputs'][index]['anonymityScore']
+
+            record['outputs'] = {}
+            for index in tx['outputs']:  # For outputs, index is correct value in this coinjoin cjtx
+                record['outputs'][index] = {}
+                record['outputs'][index]['index'] = index
+                record['outputs'][index]['address'] = tx['outputs'][index]['address']
+                record['outputs'][index]['value'] = tx['outputs'][index]['amount']
+                record['outputs'][index]['wallet_name'] = mix_name
+                record['outputs'][index]['anon_score'] = tx['outputs'][index]['anonymityScore']
+
+            # Try to load full serialized tx (if available) and extract additional info
+            tx_file_path = os.path.join(target_base_path, 'data', f'{tx['tx']}.json')
+            if os.path.exists(tx_file_path):
+                tx_hex = als.load_json_from_file(tx_file_path)['result']
+                # Compute total mining fee paid (sum(inputs) - sum(outputs))
+                inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in coinjoins[txid]['inputs'].keys()])
+                outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in coinjoins[txid]['outputs'].keys()])
+                total_mining_fee = inputs_sum - outputs_sum
+                # Compute vsize for "our" inputs and outputs out of whole transaction => our share of mining fees
+                wallet_inputs = [int(record['inputs'][item]['index']) for item in record['inputs'].keys()]
+                wallet_outputs = [int(record['outputs'][item]['index']) for item in record['outputs'].keys()]
+                wallet_vsize, total_vsize = als.compute_partial_vsize(tx_hex['hex'], wallet_inputs, wallet_outputs)
+                # Fee rate paid for whole transaction
+                fee_rate = total_mining_fee / total_vsize
+                # Mining fee rate to pay fair share for our inputs and outputs
+                wallet_fair_mfee_sats = math.ceil(wallet_vsize * fee_rate)
+                wallet_inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in record['inputs'].keys()])
+                wallet_outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in record['outputs'].keys()])
+                wallet_fee_paid_sats = wallet_inputs_sum - wallet_outputs_sum
+                #assert tx['amount'] == -wallet_fee_paid_sats, f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}"
+                if tx['amount'] != -wallet_fee_paid_sats:
+                    logging.error(f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}")
+                    logging.debug(f"Inputs: ")
+                    for index in record['inputs'].keys():
+                        logging.debug(f"  [{index}]: {coinjoins[txid]['inputs'][index]['value']} sats")
+                    logging.debug(f"Outputs: ")
+                    for index in record['outputs'].keys():
+                        logging.debug(f"  [{index}]: {coinjoins[txid]['outputs'][index]['value']} sats")
+                hidden_ctip = -tx['amount'] - wallet_fair_mfee_sats
+                if hidden_ctip < -10:
+                    logging.debug(f"Sligthly smaller hidden tip than expected: {hidden_ctip} sats")
+                assert hidden_ctip >= -100, f"Incorrect hidden tip of {hidden_ctip} sats"
+
+                record['total_mining_fee'] = total_mining_fee
+                record['mining_fee_rate'] = fee_rate
+                record['total_vsize'] = total_vsize
+                record['wallet_vsize'] = wallet_vsize
+                record['wallet_fair_mfee'] = wallet_fair_mfee_sats
+                record['wallet_fee_paid'] = -tx['amount']
+                record['wallet_hidden_ctip_paid'] = hidden_ctip
+            else:
+                logging.warning(f'{tx_file_path} is missing')
+            session_cjtxs[txid] = record
+        else:
+            # Non-coinjoin transaction detected (either initial funding one at the start of session, or start of of next session )
+            if len(session_cjtxs) > 0:
+                # We hit first non-coinjoin transaction after session => end of session
+                assert len(session_funding_tx[
+                               'outputs'].keys()) == 1, f'Funding tx {session_funding_tx['tx']} has unexpected number of outputs of {len(session_funding_tx['outputs'].keys())}'
+                norm_tx = {'txid': session_funding_tx['tx'], 'label': session_funding_tx['label'],
+                           'broadcast_time': session_funding_tx['datetime'],
+                           'value': session_funding_tx['outputs']['0']['amount']}
+                session_label = get_session_label(mix_name, session_size_inputs, session_cjtxs, norm_tx)
+                print(f'{session_label}: {session_size_inputs}')
+                als.remove_link_between_inputs_and_outputs(session_cjtxs)
+                als.compute_link_between_inputs_and_outputs(session_cjtxs, [cjtxid for cjtxid in session_cjtxs.keys()])
+
+                cjtxs['sessions'][session_label] = {'coinjoins': session_cjtxs, 'funding_tx': norm_tx}
+                session_cjtxs = {}
+                session_size_inputs = 0
+                session_funding_tx = None
+
+            # Non-coinjoin trasaction, potentially initial funding tx, then extract input liquidity into session_size_inputs
+            if len(tx['outputs']) == 1 and tx['outputs'][list(tx['outputs'].keys())[0]]['amount'] > 0:
+                #if tx['outputs'][list(tx['outputs'].keys())[0]]['amount'] > session_size_inputs:
+                session_size_inputs = tx['outputs'][list(tx['outputs'].keys())[0]]['amount']
+                session_funding_tx = tx
+
+    return cjtxs
+
+
+def analyze_multisession_mix_experiments(target_base_path: str, mix_name: str, target_as: int,
+                                         experiment_start_date: str):
+    # Load all real coinjoins executed
+    target_path = os.path.join(target_base_path, f'coinjoin_tx_info.json')
+    coinjoins_all = als.load_json_from_file(target_path)
+    # Parse and extract sessions from provided files
+    cjtxs = parse_sessions(target_base_path, mix_name, experiment_start_date, coinjoins_all)
+    # Compute statistics
+    stats = compute_multisession_statistics(cjtxs, coinjoins_all['coinjoins'], mix_name, target_as)
+
     return cjtxs, stats
 
 
 def merge_coins_files(base_path: str, file1: str, file2: str):
-    coins1 = dmp.load_json_from_file(os.path.join(base_path, file1))['result']
-    coins2 = dmp.load_json_from_file(os.path.join(base_path, file2))['result']
+    coins1 = als.load_json_from_file(os.path.join(base_path, file1))['result']
+    coins2 = als.load_json_from_file(os.path.join(base_path, file2))['result']
 
     for coin1 in coins1:
         for coin2 in coins2:
@@ -687,6 +703,29 @@ def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title):
     ax.set_yticklabels(np.arange(1, len(yedges)))
     ax.set_title(title)
     #plt.show()
+
+
+def full_analyze_emulations(base_path: str):
+    # Process emulation data
+    # 1. Extract transactions info from block_xxx.json to (many) txid.json files
+    block_files = list(Path(os.path.join(base_path, 'data', 'btc-node')).glob('block_*.json'))
+    for block_file in block_files:
+        block = als.load_json_from_file(block_file)
+        for tx in block['tx']:
+            out = {'result': tx, 'error': None, 'id': 'curltest'}
+            als.save_json_to_file(os.path.join(base_path, 'data', f"{tx['txid']}.json"), out)
+    # 2. Re-create (missing) history.json for each wallet (if required)
+    # For each wallet, load coins.json, create history.json from each coin in coins.json
+
+    # Experiment configuration
+    target_path = base_path # os.path.join(base_path, 'em1\\')
+    experiment_start_cut_date = '2024-05-14T19:02:49+00:00'  # AS=25 experiment start time
+    experiment_target_anonscore = 25
+    problematic_sessions = []
+    wallets_names = ['mix1', 'mix2', 'mix3']
+
+    return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
+                          wallets_names, problematic_sessions, None)
 
 
 def full_analyze_as25_202405(base_path: str):
