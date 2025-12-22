@@ -3414,7 +3414,7 @@ def main(argv=None):
     target_base_paths = [os.path.join(super_base_path, '!unproccesed')]
 
     # If provided, use paths from cli arguments instead
-    if op.target_path is not None:
+    if op.target_path is not None and len(op.target_path) > 0:
         super_base_path = longest_common_prefix(op.target_path)
         target_base_paths = [path for path in op.target_path]
 
