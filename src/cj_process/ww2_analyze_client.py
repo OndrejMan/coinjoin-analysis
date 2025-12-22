@@ -2,9 +2,11 @@ import copy
 import logging
 import math
 import os
+from copy import deepcopy
+from enum import Enum
 from itertools import chain
 from pathlib import Path
-
+import ast
 import seaborn as sns
 import numpy as np
 from matplotlib import pyplot as plt
@@ -13,7 +15,7 @@ from typing import Iterable, Dict, Tuple, List
 
 import cj_analysis as als
 from collections import defaultdict
-
+import argparse
 
 # Suppress DEBUG logs from a specific library
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
@@ -60,6 +62,7 @@ def plot_cj_anonscores(mfig: Multifig, data: dict, title: str, total_sessions: i
 def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_score: str, y_label: str, line_color: str, show_txid: bool = False):
     size_01_used = False
     size_02_used = False
+    size_emul_used = False
     max_y = -1
     for cj_session in data.keys():
         line_style = '-.'
@@ -69,6 +72,9 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
         elif cj_session.find('0.2btc') != -1:
             line_style = ':'
             size_02_used = True
+        elif cj_session.find('emulation') != -1:
+            line_style = 'solid'
+            size_emul_used = True
         else:
             assert False, f'Unexpected session type found for {cj_session}'
         cj_label = cj_session
@@ -76,13 +82,17 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
             cj_label = cj_label[0:cj_session.find('txid:')]
         x_range = range(1, len(data[cj_session]) + 1)
         ax.plot(x_range, data[cj_session], color=line_color, linestyle=line_style, alpha=0.15)
-        max_y = max(max(data[cj_session]), max_y)
+        max_y = max(max(data[cj_session]), max_y) if len(data[cj_session]) > 0 else max_y  # Keep maximum y observed
+
     if size_01_used:
         label = f'Input size 0.1 btc (as={anon_score})' if LONG_LEGEND else f'0.1 btc (as={anon_score})'
         ax.plot([1], [1], color=line_color, label=label, linestyle='solid', alpha=0.5)
     if size_02_used:
         label = f'Input size 0.2 btc (as={anon_score})' if LONG_LEGEND else f'0.2 btc (as={anon_score})'
         ax.plot([1], [1], color=line_color, label=label, linestyle=':', alpha=0.5)
+    if size_emul_used:
+        label = f'Input size emul btc (as={anon_score})' if LONG_LEGEND else f'separate wallets'
+        ax.plot([1], [1], color=line_color, label=label, linestyle='solid', alpha=0.5)
     ax.set_xticks(np.arange(1, 20, 2))
     ax.set_yticks(np.linspace(0, max_y, num=5))
 
@@ -105,6 +115,7 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
 
     PLOT_BASIC_AVERAGE = True
     if PLOT_BASIC_AVERAGE:
+        line_color = 'red'
         label = f'Average (as={anon_score})' if LONG_LEGEND else f'AVG (as={anon_score})'
         ax.plot(range(1, len(avg_data) + 1), avg_data, label=label, linestyle='solid',
                 linewidth=7, alpha=0.7, color=line_color)
@@ -143,8 +154,8 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
     ax.legend(loc="best", fontsize='10')
     #ax.set_title(f'{title}; total_sessions={total_sessions}')
     ax.set_title(f'{title}', fontsize=FONT_SIZE_SMALLER)
-    ax.set_xlabel('Number of coinjoins executed', fontsize=FONT_SIZE)
-    ax.set_ylabel(y_label, fontsize=FONT_SIZE)
+    ax.set_xlabel('Number of coinjoins executed', fontsize=FONT_SIZE_SMALLER)
+    ax.set_ylabel(y_label, fontsize=FONT_SIZE_SMALLER)
     #plt.show()
 
     PLOT_BOXPLOT = False
@@ -321,6 +332,7 @@ def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str,
             observed_remix_liquidity_ratio = observed_mix_liquidity / session_size_inputs
             observed_remix_liquidity_ratio_list.append(observed_remix_liquidity_ratio)
             if len(observed_remix_liquidity_ratio_cumul_list) == 0:
+                # We do expect mix liquidity ratio to be close to 1.0 (minus fees paid) in case when single utxo (session_size_inputs) was started with
                 if not math.isclose(observed_remix_liquidity_ratio, 1.0, rel_tol=1e-9):
                     print(f'\nWarning: Unexpected observed_remix_liquidity_ratio of {observed_remix_liquidity_ratio} instead 1.0')
                 observed_remix_liquidity_ratio_cumul_list.append(0)  # The first value is fresh input, not remix
@@ -468,6 +480,57 @@ def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str,
     return stats
 
 
+def fill_cj_participation_info(record: dict, target_base_path: str, tx: dict, coinjoins: dict, txid: str):
+    tx_file_path = os.path.join(target_base_path, 'data', f'{txid}.json')
+    if os.path.exists(tx_file_path):
+        tx_hex = als.load_json_from_file(tx_file_path)['result']
+        # Compute total mining fee paid (sum(inputs) - sum(outputs))
+        inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in coinjoins[txid]['inputs'].keys()])
+        outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in coinjoins[txid]['outputs'].keys()])
+        total_mining_fee = inputs_sum - outputs_sum
+        # Compute vsize for "our" inputs and outputs out of whole transaction => our share of mining fees
+        # wallet_inputs = [int(record['inputs'][item]['index']) for item in record['inputs'].keys()]
+        # wallet_outputs = [int(record['outputs'][item]['index']) for item in record['outputs'].keys()]
+        wallet_inputs = [int(item) for item in record['inputs'].keys()]
+        wallet_outputs = [int(item) for item in record['outputs'].keys()]
+        wallet_vsize, total_vsize = als.compute_partial_vsize(tx_hex['hex'], wallet_inputs, wallet_outputs)
+        # Fee rate paid for whole transaction
+        fee_rate = total_mining_fee / total_vsize
+        # Mining fee rate to pay fair share for our inputs and outputs
+        wallet_fair_mfee_sats = math.ceil(wallet_vsize * fee_rate)
+        wallet_inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in record['inputs'].keys()])
+        wallet_outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in record['outputs'].keys()])
+        wallet_fee_paid_sats = wallet_inputs_sum - wallet_outputs_sum
+        # assert tx['amount'] == -wallet_fee_paid_sats, f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}"
+        if tx and tx['amount'] != -wallet_fee_paid_sats:
+            logging.error(
+                f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}")
+            logging.debug(f"Inputs: ")
+            for index in record['inputs'].keys():
+                logging.debug(f"  [{index}]: {coinjoins[txid]['inputs'][index]['value']} sats")
+            logging.debug(f"Outputs: ")
+            for index in record['outputs'].keys():
+                logging.debug(f"  [{index}]: {coinjoins[txid]['outputs'][index]['value']} sats")
+        hidden_ctip = wallet_fee_paid_sats - wallet_fair_mfee_sats
+        if hidden_ctip < -10:
+            logging.debug(f"Sligthly smaller hidden tip than expected: {hidden_ctip} sats")
+        if hidden_ctip >= -100:
+            wallet_name = list(record['inputs'].values())[0]['wallet_name']
+            logging.debug(f"Possibly incorrect hidden tip of {hidden_ctip} sats, {txid}, {wallet_name}")
+
+        record['total_mining_fee'] = total_mining_fee
+        record['mining_fee_rate'] = fee_rate
+        record['total_vsize'] = total_vsize
+        record['wallet_vsize'] = wallet_vsize
+        record['wallet_fair_mfee'] = wallet_fair_mfee_sats
+        record['wallet_fee_paid'] = wallet_fee_paid_sats
+        record['wallet_hidden_ctip_paid'] = hidden_ctip
+    else:
+        logging.warning(f'{tx_file_path} is missing')
+
+    return record
+
+
 def parse_sessions(target_base_path: str, mix_name: str, experiment_start_date: str, coinjoins_all: dict):
     coinjoins = coinjoins_all['coinjoins']
     target_path = os.path.join(target_base_path, f'{mix_name}_history.json')
@@ -545,47 +608,7 @@ def parse_sessions(target_base_path: str, mix_name: str, experiment_start_date: 
                 record['outputs'][index]['anon_score'] = tx['outputs'][index]['anonymityScore']
 
             # Try to load full serialized tx (if available) and extract additional info
-            tx_file_path = os.path.join(target_base_path, 'data', f'{tx['tx']}.json')
-            if os.path.exists(tx_file_path):
-                tx_hex = als.load_json_from_file(tx_file_path)['result']
-                # Compute total mining fee paid (sum(inputs) - sum(outputs))
-                inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in coinjoins[txid]['inputs'].keys()])
-                outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in coinjoins[txid]['outputs'].keys()])
-                total_mining_fee = inputs_sum - outputs_sum
-                # Compute vsize for "our" inputs and outputs out of whole transaction => our share of mining fees
-                wallet_inputs = [int(record['inputs'][item]['index']) for item in record['inputs'].keys()]
-                wallet_outputs = [int(record['outputs'][item]['index']) for item in record['outputs'].keys()]
-                wallet_vsize, total_vsize = als.compute_partial_vsize(tx_hex['hex'], wallet_inputs, wallet_outputs)
-                # Fee rate paid for whole transaction
-                fee_rate = total_mining_fee / total_vsize
-                # Mining fee rate to pay fair share for our inputs and outputs
-                wallet_fair_mfee_sats = math.ceil(wallet_vsize * fee_rate)
-                wallet_inputs_sum = sum([coinjoins[txid]['inputs'][index]['value'] for index in record['inputs'].keys()])
-                wallet_outputs_sum = sum([coinjoins[txid]['outputs'][index]['value'] for index in record['outputs'].keys()])
-                wallet_fee_paid_sats = wallet_inputs_sum - wallet_outputs_sum
-                #assert tx['amount'] == -wallet_fee_paid_sats, f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}"
-                if tx['amount'] != -wallet_fee_paid_sats:
-                    logging.error(f"Incorrect wallet fee computed {wallet_fee_paid_sats} sats vs. {tx['amount']} sats for {txid}")
-                    logging.debug(f"Inputs: ")
-                    for index in record['inputs'].keys():
-                        logging.debug(f"  [{index}]: {coinjoins[txid]['inputs'][index]['value']} sats")
-                    logging.debug(f"Outputs: ")
-                    for index in record['outputs'].keys():
-                        logging.debug(f"  [{index}]: {coinjoins[txid]['outputs'][index]['value']} sats")
-                hidden_ctip = -tx['amount'] - wallet_fair_mfee_sats
-                if hidden_ctip < -10:
-                    logging.debug(f"Sligthly smaller hidden tip than expected: {hidden_ctip} sats")
-                assert hidden_ctip >= -100, f"Incorrect hidden tip of {hidden_ctip} sats"
-
-                record['total_mining_fee'] = total_mining_fee
-                record['mining_fee_rate'] = fee_rate
-                record['total_vsize'] = total_vsize
-                record['wallet_vsize'] = wallet_vsize
-                record['wallet_fair_mfee'] = wallet_fair_mfee_sats
-                record['wallet_fee_paid'] = -tx['amount']
-                record['wallet_hidden_ctip_paid'] = hidden_ctip
-            else:
-                logging.warning(f'{tx_file_path} is missing')
+            fill_cj_participation_info(record, target_base_path, tx, coinjoins, txid)
             session_cjtxs[txid] = record
         else:
             # Non-coinjoin transaction detected (either initial funding one at the start of session, or start of of next session )
@@ -705,7 +728,124 @@ def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title):
     #plt.show()
 
 
-def full_analyze_emulations(base_path: str):
+def recreate_cjtxs(base_path: str):
+    # 2. Re-create (missing) history.json for each wallet (if required)
+    # For each wallet, load coins.json, create history.json from each coin in coins.json
+    # 2. Create directly xxx_coinjoin_tx_info.json with each wallet being one 'session'
+    cjtxs = {'sessions': {}}
+    wallets_coins = als.load_json_from_file(os.path.join(base_path, 'wallets_coins.json'))
+    for wallet_name in wallets_coins:
+        cjtxs['sessions'][wallet_name] = {}
+        cjtxs['sessions'][wallet_name]['coinjoins'] = {}
+
+        for coin in wallets_coins[wallet_name]:
+            coin['anon_score'] = coin['anonymityScore']
+            coin['wallet_name'] = wallet_name
+            if 'spentBy' in coin:
+                coin['spend_by_txid'][0] = coin['spentBy']
+                coin['spend_by_txid'][1] = 1000
+            if coin['txid'] not in cjtxs['sessions'][wallet_name]['coinjoins']:
+                cjtxs['sessions'][wallet_name]['coinjoins'][coin['txid']] = {'txid': coin['txid'], 'inputs': {}, 'outputs': {}}
+            cjtxs['sessions'][wallet_name]['coinjoins'][coin['txid']]['broadcast_time'] = coin['create_time']
+
+
+def parse_sessions_from_wallets(base_path: str, coinjoins_all: dict):
+    cjtxs = {'sessions': {}}
+    wallets_coins = als.load_json_from_file(os.path.join(base_path, 'wallets_coins.json'))
+
+    for wallet_name in wallets_coins:
+        logging.info(f"{wallet_name} wallet: ")
+        session_name = f'emulation {wallet_name}'
+
+        cjtxs['sessions'][session_name] = {}
+
+        # Funding tx for emulations can be spread. Create virtual one computed over all coins with anon_score=1.0
+        # BUGBUG: This can create temporary incorrect result for privacy progress
+        cjtxs['sessions'][session_name]['funding_tx'] = {'label': session_name}
+        fund_value = 0
+        for coin in wallets_coins[wallet_name]:
+            if math.isclose(coin['anonymityScore'], 1.0, rel_tol=1e-9):
+                fund_value += coin['amount']
+                if 'txid' in cjtxs['sessions'][session_name]['funding_tx'].keys():
+                    logging.info(f"  More than one funding transaction detected: {cjtxs['sessions'][session_name]['funding_tx']['txid']}")
+                cjtxs['sessions'][session_name]['funding_tx']['txid'] = coin['txid']
+                cjtxs['sessions'][session_name]['funding_tx']['broadcast_time'] = coin['create_time']
+        cjtxs['sessions'][session_name]['funding_tx']['value'] = fund_value
+        print(f'{wallet_name}: {fund_value/SATS_IN_BTC} funding value')
+
+        # Get data from existing structure, but filter out all !wallet_name items
+        cjtxs['sessions'][session_name]['coinjoins'] = deepcopy(coinjoins_all['coinjoins'])  # As we will be removing some items, create deep copy
+        for cjtx in coinjoins_all['coinjoins'].keys():
+            record = cjtxs['sessions'][session_name]['coinjoins'][cjtx]
+            for index in list(record['inputs'].keys()):  # Remove all inputs of other wallets
+                if record['inputs'][index]['wallet_name'] != wallet_name:
+                    record['inputs'].pop(index)
+            for index in list(record['outputs'].keys()):  # Remove all outputs of other wallets
+                if record['outputs'][index]['wallet_name'] != wallet_name:
+                    record['outputs'].pop(index)
+
+            if len(record['inputs']) == 0 and len(record['outputs']) == 0:
+                # No participation in this coinjoin
+                cjtxs['sessions'][session_name]['coinjoins'].pop(cjtx)
+            else:
+                # Compute additional transaction metadata
+                fill_cj_participation_info(cjtxs['sessions'][session_name]['coinjoins'][cjtx], base_path, None,
+                                           coinjoins_all['coinjoins'], cjtx)
+
+        SANITIZE_ANON_SCORES = False  # If True, setting of anon_score values is performed (was not saved properly for older emulation processing)
+        if SANITIZE_ANON_SCORES:
+            # Fill all anon_score records for inputs where missing (use anon_score of output if filled, otherwise set to 1)
+            # Start with outputs - if spent, then fill anon_score
+            for cjtx in cjtxs['sessions'][session_name]['coinjoins'].keys():
+                record = cjtxs['sessions'][session_name]['coinjoins'][cjtx]
+                for index in record['outputs'].keys():
+                    if 'spend_by_txid' in record['outputs'][index].keys():
+                        txid, tx_index = record['outputs'][index]['spend_by_txid']
+                        tx_index = str(tx_index)
+                        if txid in cjtxs['sessions'][session_name]['coinjoins'].keys():
+                            if (txid in cjtxs['sessions'][session_name]['coinjoins'].keys() and
+                                    'anon_score' in cjtxs['sessions'][session_name]['coinjoins'][txid]['inputs'][tx_index].keys()):
+                                assert math.isclose(cjtxs['sessions'][session_name]['coinjoins'][txid]['inputs'][tx_index]['anon_score'], record['outputs'][index]['anon_score'], rel_tol=1e-9)
+                            else:
+                                cjtxs['sessions'][session_name]['coinjoins'][txid]['inputs'][tx_index]['anon_score'] = record['outputs'][index]['anon_score']
+
+            # Fill all non-set inputs to anonscore 1.0
+            for cjtx in cjtxs['sessions'][session_name]['coinjoins'].keys():
+                record = cjtxs['sessions'][session_name]['coinjoins'][cjtx]
+                for index in record['inputs'].keys():
+                    if 'anon_score' not in record['inputs'][index].keys():
+                        record['inputs'][index]['anon_score'] = 1.0
+
+        # Inserted coinjoins may not be sorted in dict based on broadcast_time - sort and re-assign
+        session_cjs = cjtxs['sessions'][session_name]['coinjoins']
+        sorted_session_cjs = dict(sorted(session_cjs.items(), key=lambda item: item[1]['broadcast_time']))
+        cjtxs['sessions'][session_name]['coinjoins'] = sorted_session_cjs
+
+        for cjtx in cjtxs['sessions'][session_name]['coinjoins'].keys():
+            record = cjtxs['sessions'][session_name]['coinjoins'][cjtx]
+            for index in record['inputs'].keys():
+                if 'anon_score' not in record['inputs'][index].keys():
+                    record['inputs'][index]['anon_score'] = 1.0
+
+        # Sanity check - all inputs and outputs coins shall have assigned anonymity score and it shall match wallets_coins.json
+        for coin in wallets_coins[wallet_name]:
+            if coin['txid'] not in cjtxs['sessions'][session_name]['coinjoins'].keys():
+                # Likely funding transaction
+                if not math.isclose(coin['anonymityScore'], 1.0, rel_tol=1e-9):
+                    logging.warning(f'{wallet_name} coin from {coin['txid']} ({coin['address']}) missing from coinjoins')
+            else:
+                # Check all outputs
+                assert math.isclose(coin['anonymityScore'], cjtxs['sessions'][session_name]['coinjoins'][coin['txid']]['outputs'][str(coin['index'])]['anon_score'], rel_tol=1e-9), f'Mismatch in anonscore for {coin['txid']}:{coin['index']}'
+
+        # Sanity check - at least one coinjoin shall be present for a given wallet. Drop inactive wallets
+        if len(cjtxs['sessions'][session_name]['coinjoins']) == 0:
+            logging.warning(f'No coinjoin participation detected for wallet {wallet_name} with {len(wallets_coins[wallet_name])} initial coins, dropping from dict')
+            cjtxs['sessions'].pop(session_name)
+
+    return cjtxs
+
+
+def full_analyze_emulations(base_path: str, target_as: int, exp_name_label: str):
     # Process emulation data
     # 1. Extract transactions info from block_xxx.json to (many) txid.json files
     block_files = list(Path(os.path.join(base_path, 'data', 'btc-node')).glob('block_*.json'))
@@ -714,18 +854,19 @@ def full_analyze_emulations(base_path: str):
         for tx in block['tx']:
             out = {'result': tx, 'error': None, 'id': 'curltest'}
             als.save_json_to_file(os.path.join(base_path, 'data', f"{tx['txid']}.json"), out)
-    # 2. Re-create (missing) history.json for each wallet (if required)
-    # For each wallet, load coins.json, create history.json from each coin in coins.json
 
-    # Experiment configuration
-    target_path = base_path # os.path.join(base_path, 'em1\\')
-    experiment_start_cut_date = '2024-05-14T19:02:49+00:00'  # AS=25 experiment start time
-    experiment_target_anonscore = 25
-    problematic_sessions = []
-    wallets_names = ['mix1', 'mix2', 'mix3']
+    # 2. Create directly xxx_coinjoin_tx_info.json with each wallet being one 'session'.
+    # Use pre-created coinjoin_tx_info.json, filter out all transactions and ins/outs not belonging to this wallet
+    coinjoins_all = als.load_json_from_file(os.path.join(base_path, 'coinjoin_tx_info.json'))
+    cjtxs = parse_sessions_from_wallets(base_path, coinjoins_all)
+    als.save_json_to_file_pretty(os.path.join(base_path, f'{exp_name_label}_coinjoin_tx_info.json'), cjtxs)
 
-    return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
-                          wallets_names, problematic_sessions, None)
+    stats = compute_multisession_statistics(cjtxs, coinjoins_all['coinjoins'], '', target_as)
+    als.save_json_to_file_pretty(os.path.join(base_path, f'{exp_name_label}_stats.json'), stats)
+
+    plot_client_experiments_graphs(cjtxs, stats, target_as, base_path)
+
+    return cjtxs, stats
 
 
 def full_analyze_as25_202405(base_path: str):
@@ -781,6 +922,160 @@ def full_analyze_as38_202503(base_path: str):
                           wallets_names, problematic_sessions, 23)
 
 
+def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, experiment_target_anonscore: int, target_path: str):
+    NUM_COLUMNS = 3  # 4
+    NUM_ROWS = 6  # 5
+    # fig = plt.figure(figsize=(20, NUM_ROWS * 2.5))
+    fig = plt.figure(figsize=(10, NUM_ROWS * 2.5))
+    mfig = Multifig(plt, fig, NUM_ROWS, NUM_COLUMNS)
+
+    # Plot graphs
+    plot_cj_anonscores(mfig, all_stats['anon_percentage_status'],
+                       f'Progress towards fully anonymized liquidity (AS={experiment_target_anonscore})',
+                       len(all_stats['anon_percentage_status']),
+                       f'{experiment_target_anonscore}', 'Privacy progress (%)', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['anon_gain'],
+                       f'Change in anonscore weighted (AS={experiment_target_anonscore})',
+                       len(all_stats['anon_gain']),
+                       f'{experiment_target_anonscore}', 'Anonscore gain', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['observed_mix_liquidity'],
+                       f'Mix liquidity (AS={experiment_target_anonscore})',
+                       len(all_stats['observed_mix_liquidity']),
+                       f'{experiment_target_anonscore}', 'Cummulative mixed value (sats)', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['skipped_cjtxs'],
+                       f'Skipped cjtxs', len(all_stats['skipped_cjtxs']),
+                       f'{experiment_target_anonscore}', 'num cjtxs skipped', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['num_inputs'],
+                       f'Number of inputs', len(all_stats['num_inputs']),
+                       f'{experiment_target_anonscore}', 'number of inputs', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['num_outputs'],
+                       f'Number of outputs', len(all_stats['num_outputs']),
+                       f'{experiment_target_anonscore}', 'number of outputs', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['anon_gain_ratio'],
+                       f'Change in anonscore weighted ratio out/in (AS={experiment_target_anonscore})',
+                       len(all_stats['anon_gain']),
+                       f'{experiment_target_anonscore}', 'Anonscore gain (weighted, ratio)', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['observed_remix_liquidity_ratio_cumul'],
+                       f'Cumulative remix liquidity ratio (AS={experiment_target_anonscore})',
+                       len(all_stats['observed_remix_liquidity_ratio_cumul']),
+                       f'{experiment_target_anonscore}', 'Cumulative remix ratio', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['anon_gain_weighted'],
+                       f'Nocap progress towards fully anonymized liquidity (AS={experiment_target_anonscore})',
+                       len(all_stats['anon_gain_weighted']),
+                       f'{experiment_target_anonscore}', 'Privacy progress (%)', 'royalblue')
+    plot_cj_anonscores(mfig, all_stats['num_wallet_coins'],
+                       f'Number of wallet coins (AS={experiment_target_anonscore})',
+                       len(all_stats['num_wallet_coins']),
+                       f'{experiment_target_anonscore}', '# coins', 'royalblue')
+
+    x, y = [], []
+    for session in all_stats['num_inputs'].keys():
+        x.extend(all_stats['num_inputs'][session])
+        y.extend(all_stats['num_outputs'][session])
+    title = 'Frequency of inputs to outputs pairs' if LONG_LEGEND else 'Freq. of input/output nums'
+    plot_cj_heatmap(mfig, x, y, 'number of inputs', 'number of outputs', title)
+
+    # Plot histogram of hidden coordination fees (cfee)
+    ax = mfig.add_subplot()
+    data_mfee = [all_cjs['sessions'][session_label]['coinjoins'][cjtxid]['wallet_fair_mfee'] for session_label in
+                 all_cjs['sessions'].keys() for cjtxid in all_cjs['sessions'][session_label]['coinjoins'].keys()]
+    data_ctips = [all_cjs['sessions'][session_label]['coinjoins'][cjtxid]['wallet_hidden_ctip_paid'] for
+                  session_label in all_cjs['sessions'].keys() for cjtxid in
+                  all_cjs['sessions'][session_label]['coinjoins'].keys()]
+    data_ctips_small = [value for value in data_ctips if value < 10000]
+    print(f'Mining fee sum={sum(data_mfee)}')
+    print(f'Hidden ctip (sum={sum(data_ctips)}): {sorted(data_ctips)}')
+    label = f'Fair mining fee: {sum(data_mfee)} sats' if LONG_LEGEND else f'Mining fee'
+    ax.hist(data_mfee, bins=30, color='green', edgecolor='black', alpha=0.5, label=label)
+    label = f'Hidden coord. tips: {sum(data_ctips)} sats' if LONG_LEGEND else f'Hidden coord. tips'
+    ax.hist(data_ctips_small, bins=100, color='red', edgecolor='black', alpha=0.5, label=label)
+    ax.set_xlabel('fee (sats)')
+    ax.set_ylabel('# occurences')
+    max_x = ax.get_xlim()[1]
+    if max_x < 9000:  # Unify axis for real as25 and as38 experiments
+        ax.set_xlim(0, 9000)
+    title = 'Distribution of mining and hidden coordination tips' if LONG_LEGEND else 'Mining & hidden coord. tips'
+    ax.set_title(title)
+    ax.legend()
+
+    # Plot histogram of anonscores at the last round of session (when all coins are mixed)
+    ax = mfig.add_subplot()
+    data_anonscores = []
+    for session_label in all_stats['anonscore_coins_distribution'].keys():
+        data_anonscores.extend(all_stats['anonscore_coins_distribution'][session_label][-1])
+    # num_bins = math.ceil(max(data_anonscores)) - math.floor(min(data_anonscores))
+    bins = np.arange(min(data_anonscores), max(data_anonscores) + 1, 1)
+    ax.hist(data_anonscores, bins=bins, color='green', edgecolor='black', alpha=0.5, label=f'Anonscore frequency')
+    ax.axvline(experiment_target_anonscore, color='r', linestyle='--',
+               label=f"Target anonscore={experiment_target_anonscore}")
+    ax.set_xlabel('Anonscore')
+    ax.set_ylabel('# occurences')
+    title = 'Distribution of anonscores at the end of mixing sessions' if LONG_LEGEND else 'Final anonscores distribution'
+    ax.set_title(title)
+    ax.legend()
+
+    sessions_lengths = [len(all_cjs['sessions'][session]['coinjoins']) for session in all_cjs['sessions'].keys()]
+    print(f'Total sessions={len(all_cjs['sessions'].keys())}, total coinjoin txs={sum(sessions_lengths)}')
+    print(
+        f'Session lengths (#cjtxs): median={round(np.median(sessions_lengths), 2)}, average={round(np.average(sessions_lengths), 2)}, min={min(sessions_lengths)}, max={max(sessions_lengths)}')
+
+    total_output_coins = [all_stats['num_coins'][session] for session in all_stats['num_coins']]
+    print(f'Total output coins: {sum(total_output_coins)}')
+
+    total_overmixed_coins = [all_stats['num_overmixed_coins'][session] for session in
+                             all_stats['num_overmixed_coins']]
+    print(f'Total overmixed input coins: {sum(total_overmixed_coins)}')
+
+    # num_skipped = list(chain.from_iterable(all_stats['skipped_cjtxs'][session] for session in all_stats['skipped_cjtxs']))
+    # print(f'Skipped txs stats: median={np.median(num_skipped)}, average={round(np.average(num_skipped), 2)}, min={min(num_skipped)}, max={max(num_skipped)}')
+
+    remix_ratios = [max(all_stats['observed_remix_liquidity_ratio_cumul'][session]) for session in
+                    all_stats['observed_remix_liquidity_ratio_cumul'].keys()]
+    print(
+        f'Remix ratios: median={round(np.median(remix_ratios), 2)}, average={round(np.average(remix_ratios), 2)}, min={round(min(remix_ratios), 2)}, max={round(max(remix_ratios), 2)}')
+
+    expected_remix_fraction = round((np.average(remix_ratios) / (np.average(remix_ratios) + 1)) * 100, 2)
+    print(f'Expected remix fraction: {expected_remix_fraction}%')
+
+    num_inputs = list(chain.from_iterable(all_stats['num_inputs'][session] for session in all_stats['num_inputs']))
+    print(
+        f'Input stats: median={np.median(num_inputs)}, average={round(np.average(num_inputs), 2)}, min={min(num_inputs)}, max={max(num_inputs)}')
+
+    num_outputs = list(
+        chain.from_iterable(all_stats['num_outputs'][session] for session in all_stats['num_outputs']))
+    print(
+        f'Output stats: median={np.median(num_outputs)}, average={round(np.average(num_outputs), 2)}, min={min(num_outputs)}, max={max(num_outputs)}')
+
+    progress_100 = len(
+        [all_stats['anon_percentage_status'][session][0] for session in all_stats['anon_percentage_status'] if
+         all_stats['anon_percentage_status'][session][0] > 99])
+    print(
+        f'Anonscore target of {experiment_target_anonscore} hit already during first coinjoin for {progress_100} of {len(all_stats['anon_percentage_status'])} sessions {round(progress_100 / len(all_stats['anon_percentage_status']) * 100, 2)}%')
+
+    anonscore_gains = list(
+        chain.from_iterable(all_stats['anon_gain'][session] for session in all_stats['anon_gain']))
+    geometric_mean = np.exp(np.mean(np.log(anonscore_gains)))
+    print(
+        f'Anonscore (weighted) gain per one coinjoin: median={round(np.median(anonscore_gains), 2)}, average={round(np.average(anonscore_gains), 2)}, geometric average={round(geometric_mean, 2)}, min={round(min(anonscore_gains), 2)}, max={round(max(anonscore_gains), 2)}')
+
+    anonscore_gains = list(
+        chain.from_iterable(all_stats['anon_gain_ratio'][session] for session in all_stats['anon_gain']))
+    geometric_mean = np.exp(np.mean(np.log(anonscore_gains)))
+    print(
+        f'Anonscore (weighted) ratio gain per one coinjoin: median={round(np.median(anonscore_gains), 2)}, average={round(np.average(anonscore_gains), 2)}, geometric average={round(geometric_mean, 2)}, min={round(min(anonscore_gains), 2)}, max={round(max(anonscore_gains), 2)}')
+
+    # TODO: Probability of coin selection based on its current anonymity score
+
+    # save graph
+    mfig.plt.suptitle(f'as{experiment_target_anonscore}',
+                      fontsize=16)  # Adjust the fontsize and y position as needed
+    mfig.plt.subplots_adjust(bottom=0.1, wspace=0.5, hspace=0.5)
+    save_file = os.path.join(target_path, f'as{experiment_target_anonscore}_coinjoin_stats')
+    mfig.plt.savefig(f'{save_file}.png', dpi=300)
+    mfig.plt.savefig(f'{save_file}.pdf', dpi=300)
+    mfig.plt.close()
+
+
 def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, experiment_target_anonscore: int,
                           wallets_names: list, problematic_sessions: list, assert_num_expected_sessions: int, addon_label: str=""):
     all_cjs = {}
@@ -823,12 +1118,6 @@ def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, expe
         return cjs, wallet_stats
 
 
-    NUM_COLUMNS = 3  # 4
-    NUM_ROWS = 6     # 5
-    #fig = plt.figure(figsize=(20, NUM_ROWS * 2.5))
-    fig = plt.figure(figsize=(10, NUM_ROWS * 2.5))
-    mfig = Multifig(plt, fig, NUM_ROWS, NUM_COLUMNS)
-
     for wallet_name in wallets_names:
         cjs, wallet_stats = analyze_mix(target_path, wallet_name, experiment_target_anonscore, experiment_start_cut_date, problematic_sessions)
         als.merge_dicts(cjs, all_cjs)
@@ -842,121 +1131,7 @@ def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, expe
     save_path = os.path.join(target_path, f'as{experiment_target_anonscore}{addon_label}stats.json')
     als.save_json_to_file_pretty(save_path, all_stats)
 
-    # Plot graphs
-    plot_cj_anonscores(mfig, all_stats['anon_percentage_status'], f'Progress towards fully anonymized liquidity (AS={experiment_target_anonscore})', len(all_stats['anon_percentage_status']),
-                       f'{experiment_target_anonscore}', 'Privacy progress (%)', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['anon_gain'], f'Change in anonscore weighted (AS={experiment_target_anonscore})', len(all_stats['anon_gain']),
-                       f'{experiment_target_anonscore}','Anonscore gain', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['observed_mix_liquidity'], f'Mix liquidity (AS={experiment_target_anonscore})', len(all_stats['observed_mix_liquidity']),
-                       f'{experiment_target_anonscore}','Cummulative mixed value (sats)', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['skipped_cjtxs'],
-                       f'Skipped cjtxs', len(all_stats['skipped_cjtxs']),
-                       f'{experiment_target_anonscore}','num cjtxs skipped', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['num_inputs'],
-                       f'Number of inputs', len(all_stats['num_inputs']),
-                       f'{experiment_target_anonscore}','number of inputs', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['num_outputs'],
-                       f'Number of outputs', len(all_stats['num_outputs']),
-                       f'{experiment_target_anonscore}','number of outputs', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['anon_gain_ratio'], f'Change in anonscore weighted ratio out/in (AS={experiment_target_anonscore})', len(all_stats['anon_gain']),
-                       f'{experiment_target_anonscore}','Anonscore gain (weighted, ratio)', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['observed_remix_liquidity_ratio_cumul'], f'Cumulative remix liquidity ratio (AS={experiment_target_anonscore})', len(all_stats['observed_remix_liquidity_ratio_cumul']),
-                       f'{experiment_target_anonscore}','Cumulative remix ratio', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['anon_gain_weighted'], f'Nocap progress towards fully anonymized liquidity (AS={experiment_target_anonscore})', len(all_stats['anon_gain_weighted']),
-                       f'{experiment_target_anonscore}', 'Privacy progress (%)', 'royalblue')
-    plot_cj_anonscores(mfig, all_stats['num_wallet_coins'], f'Number of wallet coins (AS={experiment_target_anonscore})', len(all_stats['num_wallet_coins']),
-                       f'{experiment_target_anonscore}', '# coins', 'royalblue')
-
-
-
-    x, y = [], []
-    for session in all_stats['num_inputs'].keys():
-        x.extend(all_stats['num_inputs'][session])
-        y.extend(all_stats['num_outputs'][session])
-    title = 'Frequency of inputs to outputs pairs' if LONG_LEGEND else 'Freq. of input/output nums'
-    plot_cj_heatmap(mfig, x, y, 'number of inputs', 'number of outputs',title)
-
-    # Plot histogram of hidden coordination fees (cfee)
-    ax = mfig.add_subplot()
-    data_mfee = [all_cjs['sessions'][session_label]['coinjoins'][cjtxid]['wallet_fair_mfee'] for session_label in all_cjs['sessions'].keys() for cjtxid in all_cjs['sessions'][session_label]['coinjoins'].keys()]
-    data_ctips = [all_cjs['sessions'][session_label]['coinjoins'][cjtxid]['wallet_hidden_ctip_paid'] for session_label in all_cjs['sessions'].keys() for cjtxid in all_cjs['sessions'][session_label]['coinjoins'].keys()]
-    data_ctips_small = [value for value in data_ctips if value < 10000]
-    print(f'Mining fee sum={sum(data_mfee)}')
-    print(f'Hidden ctip (sum={sum(data_ctips)}): {sorted(data_ctips)}')
-    label = f'Fair mining fee: {sum(data_mfee)} sats' if LONG_LEGEND else f'Mining fee'
-    ax.hist(data_mfee, bins=30, color='green', edgecolor='black', alpha=0.5, label=label)
-    label = f'Hidden coord. tips: {sum(data_ctips)} sats' if LONG_LEGEND else f'Hidden coord. tips'
-    ax.hist(data_ctips_small, bins=100, color='red', edgecolor='black', alpha=0.5, label=label)
-    ax.set_xlabel('fee (sats)')
-    ax.set_ylabel('# occurences')
-    ax.set_xlim(0, 9000)
-    title = 'Distribution of mining and hidden coordination tips' if LONG_LEGEND else 'Mining & hidden coord. tips'
-    ax.set_title(title)
-    ax.legend()
-
-
-    # Plot histogram of anonscores at the last round of session (when all coins are mixed)
-    ax = mfig.add_subplot()
-    data_anonscores = []
-    for session_label in all_stats['anonscore_coins_distribution'].keys():
-        data_anonscores.extend(all_stats['anonscore_coins_distribution'][session_label][-1])
-    #num_bins = math.ceil(max(data_anonscores)) - math.floor(min(data_anonscores))
-    bins = np.arange(min(data_anonscores), max(data_anonscores) + 1, 1)
-    ax.hist(data_anonscores, bins=bins, color='green', edgecolor='black', alpha=0.5, label=f'Anonscore frequency')
-    ax.axvline(experiment_target_anonscore, color='r', linestyle='--', label=f"Target anonscore={experiment_target_anonscore}")
-    ax.set_xlabel('Anonscore')
-    ax.set_ylabel('# occurences')
-    title = 'Distribution of anonscores at the end of mixing sessions' if LONG_LEGEND else 'Final anonscores distribution'
-    ax.set_title(title)
-    ax.legend()
-
-
-    sessions_lengths = [len(all_cjs['sessions'][session]['coinjoins']) for session in all_cjs['sessions'].keys()]
-    print(f'Total sessions={len(all_cjs['sessions'].keys())}, total coinjoin txs={sum(sessions_lengths)}')
-    print(f'Session lengths (#cjtxs): median={round(np.median(sessions_lengths), 2)}, average={round(np.average(sessions_lengths), 2)}, min={min(sessions_lengths)}, max={max(sessions_lengths)}')
-
-    total_output_coins = [all_stats['num_coins'][session] for session in all_stats['num_coins']]
-    print(f'Total output coins: {sum(total_output_coins)}')
-
-    total_overmixed_coins = [all_stats['num_overmixed_coins'][session] for session in all_stats['num_overmixed_coins']]
-    print(f'Total overmixed input coins: {sum(total_overmixed_coins)}')
-
-    # num_skipped = list(chain.from_iterable(all_stats['skipped_cjtxs'][session] for session in all_stats['skipped_cjtxs']))
-    # print(f'Skipped txs stats: median={np.median(num_skipped)}, average={round(np.average(num_skipped), 2)}, min={min(num_skipped)}, max={max(num_skipped)}')
-
-    remix_ratios = [max(all_stats['observed_remix_liquidity_ratio_cumul'][session]) for session in all_stats['observed_remix_liquidity_ratio_cumul'].keys()]
-    print(f'Remix ratios: median={round(np.median(remix_ratios), 2)}, average={round(np.average(remix_ratios), 2)}, min={round(min(remix_ratios), 2)}, max={round(max(remix_ratios), 2)}')
-
-    expected_remix_fraction = round((np.average(remix_ratios) / (np.average(remix_ratios) + 1)) * 100, 2)
-    print(f'Expected remix fraction: {expected_remix_fraction}%')
-
-    num_inputs = list(chain.from_iterable(all_stats['num_inputs'][session] for session in all_stats['num_inputs']))
-    print(f'Input stats: median={np.median(num_inputs)}, average={round(np.average(num_inputs), 2)}, min={min(num_inputs)}, max={max(num_inputs)}')
-
-    num_outputs = list(chain.from_iterable(all_stats['num_outputs'][session] for session in all_stats['num_outputs']))
-    print(f'Output stats: median={np.median(num_outputs)}, average={round(np.average(num_outputs), 2)}, min={min(num_outputs)}, max={max(num_outputs)}')
-
-    progress_100 = len([all_stats['anon_percentage_status'][session][0] for session in all_stats['anon_percentage_status'] if all_stats['anon_percentage_status'][session][0] > 99])
-    print(f'Anonscore target of {experiment_target_anonscore} hit already during first coinjoin for {progress_100} of {len(all_stats['anon_percentage_status'])} sessions {round(progress_100 / len(all_stats['anon_percentage_status']) * 100, 2)}%')
-
-    anonscore_gains = list(chain.from_iterable(all_stats['anon_gain'][session] for session in all_stats['anon_gain']))
-    geometric_mean = np.exp(np.mean(np.log(anonscore_gains)))
-    print(f'Anonscore (weighted) gain per one coinjoin: median={round(np.median(anonscore_gains), 2)}, average={round(np.average(anonscore_gains), 2)}, geometric average={round(geometric_mean, 2)}, min={round(min(anonscore_gains), 2)}, max={round(max(anonscore_gains), 2)}')
-
-    anonscore_gains = list(chain.from_iterable(all_stats['anon_gain_ratio'][session] for session in all_stats['anon_gain']))
-    geometric_mean = np.exp(np.mean(np.log(anonscore_gains)))
-    print(f'Anonscore (weighted) ratio gain per one coinjoin: median={round(np.median(anonscore_gains), 2)}, average={round(np.average(anonscore_gains), 2)}, geometric average={round(geometric_mean, 2)}, min={round(min(anonscore_gains), 2)}, max={round(max(anonscore_gains), 2)}')
-
-    # TODO: Probability of coin selection based on its current anonymity score
-
-
-    # save graph
-    mfig.plt.suptitle(f'as{experiment_target_anonscore}', fontsize=16)  # Adjust the fontsize and y position as needed
-    mfig.plt.subplots_adjust(bottom=0.1, wspace=0.5, hspace=0.5)
-    save_file = os.path.join(target_path, f'as{experiment_target_anonscore}_coinjoin_stats')
-    mfig.plt.savefig(f'{save_file}.png', dpi=300)
-    mfig.plt.savefig(f'{save_file}.pdf', dpi=300)
-    mfig.plt.close()
+    plot_client_experiments_graphs(all_cjs, all_stats, experiment_target_anonscore, target_path)
 
     return all_stats, all_cjs
 
@@ -1138,7 +1313,7 @@ def create_wallet_estimation_matrix(cj_stats: dict, values_range: list):
                                                                      DROP_INITIAL_COINJOINS_OUTPUTS, alpha, clip_min)
     return full_matrix
 
-def visualize_estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str, cj_stats2: dict, prefix2: str, color2: str, alpha: float=0.05, clip_min: float=1.0):
+def visualize_estimate_wallet_bounds(base_path: str, cj_stats1: dict, prefix1: str, color1: str, cj_stats2: dict, prefix2: str, color2: str, alpha: float=0.05, clip_min: float=1.0):
     # Estimate wallets estimation bounds
     plt.figure(figsize=(10, 6))
 
@@ -1183,55 +1358,198 @@ def visualize_estimate_wallet_bounds(cj_stats1: dict, prefix1: str, color1: str,
     plt.close()
 
 
-if __name__ == "__main__":
+
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser()
+    # --cjtype ww2 --action process_dumplings --action detect_false_positives --target-path c:\!blockchains\CoinJoin\Dumplings_Stats_20241225\
+    parser.add_argument("-t", "--cjtype",
+                        help="Type of coinjoin. 'ww1'...Wasabi 1.x; 'ww2'...Wasabi 2.x; 'sw'...Samourai Whirlpool; 'jm'...JoinMarket ",
+                        choices=["ww1", "ww2", "sw", "jm"],
+                        action="store", metavar="TYPE",
+                        required=False)
+    parser.add_argument("-a", "--action",
+                        help="Action to performed. Can be multiple. 'process_as25as38'...process data from real client-side experiments; "
+                             "'process_emulations'...process data from coinjoin emulations;"
+                             "'compute_num_predict_matrix'...compute wallet number prediction matrix",
+                        choices=["process_as25as38", "process_emulations", "compute_num_predict_matrix"],
+                        action="append", metavar="ACTION",
+                        required=False)
+    parser.add_argument("-tp", "--target-path",
+                        help="Target path with experiment(s) to be processed. Can be multiple.",
+                        action="store", metavar="PATH",
+                        required=False)
+    parser.add_argument("-ev", "--env_vars",
+                        help="Allows to set internal variable and switches. Use with maximal care.",
+                        action="store", metavar="ENV_VARS",
+                        required=False)
+
+    parser.print_help()
+
+    return parser.parse_args(argv)
+
+
+class CoinjoinType(Enum):
+    WW1 = 1         # Wasabi 1.x
+    WW2 = 2         # Wasabi 2.x
+    SW = 3          # Samourai Whirlpool
+    JM = 4          # Samourai Whirlpool
+
+class ClientParseOptions:
+    DEBUG = False
+    # Limit analysis only to specific coinjoin type
+    CJ_TYPE = CoinjoinType.WW2
+    SORT_COINJOINS_BY_RELATIVE_ORDER = True
+
+    PROCESS_AS25AS38 = False
+    PROCESS_EMULATIONS = False
+
+    COMPUTE_NUMWALLETS_PREDICT_MATRIX = False
+
+    TARGET_AS = 5
+
+    target_base_path = ''
+
+    def __init__(self):
+        self.default_values()
+
+    def set_args(self, a):
+        if a.cjtype is not None:
+            if a.cjtype == 'ww1':
+                self.CJ_TYPE = CoinjoinType.WW1
+            if a.cjtype == 'ww2':
+                self.CJ_TYPE = CoinjoinType.WW2
+            if a.cjtype == 'sw':
+                self.CJ_TYPE = CoinjoinType.SW
+            if a.cjtype == 'jm':
+                self.CJ_TYPE = CoinjoinType.JM
+
+            if self.CJ_TYPE == CoinjoinType.WW2:
+                self.SORT_COINJOINS_BY_RELATIVE_ORDER = True
+            else:
+                self.SORT_COINJOINS_BY_RELATIVE_ORDER = False
+
+        if a.action is not None:
+            for act in a.action:
+                if act == 'process_as25as38':
+                    self.PROCESS_AS25AS38 = True
+                    self.COMPUTE_NUMWALLETS_PREDICT_MATRIX = True
+                if act == 'process_emulations':
+                    self.PROCESS_EMULATIONS = True
+                if act == 'compute_num_predict_matrix':
+                    self.COMPUTE_NUMWALLETS_PREDICT_MATRIX = True
+
+        if a.target_path is not None:
+            self.target_base_path = a.target_path
+
+        if a.env_vars is not None:
+            for item in a.env_vars.split(";"):
+                item = item.strip()  # Remove extra spaces
+                if "=" in item:
+                    key, value = map(str.strip, item.split("=", 1))  # Split and strip spaces
+
+                    try:
+                        value = ast.literal_eval(value)  # Try to evaluate the value (e.g., bool, list, int)
+                    except (ValueError, SyntaxError):
+                        logging.warning(f"Unable to parse value '{value}' for key '{key}', using raw string.")
+                        value = value  # Fallback: use the original string as-is
+
+                    if hasattr(self, key):  # Only set existing attributes
+                        setattr(self, key, value)
+                    else:
+                        logging.warning(f"'{item}' command line is not a recognized attribute and will be ignored.")
+
+    def default_values(self):
+        self.DEBUG = False
+        self.CJ_TYPE = CoinjoinType.WW2
+        # Sorting strategy for coinjoins in time.
+        # If False, coinjoins are sorted using 'broadcast_time'
+        #    (which is equal to mining_time for on-chain cjtxs where we lack real broadcast time)
+        # If True, then relative ordering based on connections in graph formed by remix inputs/outputs is used
+        if self.CJ_TYPE == CoinjoinType.WW2:
+            self.SORT_COINJOINS_BY_RELATIVE_ORDER = True
+        else:
+            self.SORT_COINJOINS_BY_RELATIVE_ORDER = False
+        als.SORT_COINJOINS_BY_RELATIVE_ORDER = self.SORT_COINJOINS_BY_RELATIVE_ORDER
+        self.PROCESS_AS25AS38 = False
+        self.PROCESS_EMULATIONS = False
+
+        self.COMPUTE_NUMWALLETS_PREDICT_MATRIX = False
+
+        self.TARGET_AS = 5
+
+
+    def print_attributes(self):
+        print('*******************************************')
+        print('ClientExpParseOptions parameters:')
+        for attr, value in vars(self).items():
+            print(f'  {attr}={value}')
+        print('*******************************************')
+
+
+def main(argv=None):
+    global op
+    op = ClientParseOptions()
+    # parse arguments, overwrite default settings if required
+    args = parse_arguments(argv)
+    op.set_args(args)
+
     als.SORT_COINJOINS_BY_RELATIVE_ORDER = False
-    # round_logs = als.parse_client_coinjoin_logs(target_path)
-    # exit(42)
 
-    # prison_logs = analyse_prison_logs(target_path)
-    # exit(42)
-    base_path = 'c:\\!blockchains\\CoinJoin\\WasabiWallet_experiments\\mn1\\'
+    if op.PROCESS_EMULATIONS:
+        als.SORT_COINJOINS_BY_RELATIVE_ORDER = False
 
-    all38_stats = als.load_json_from_file(os.path.join(base_path, 'as38', 'as38_all_stats.json'))
-    all25_stats = als.load_json_from_file(os.path.join(base_path, 'as25', 'as25_all_stats.json'))
-    visualize_estimate_wallet_bounds(all25_stats, 'as25', 'lightcoral', all38_stats, 'as38', 'royalblue')
+        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-04-17_12-26_uniform-static-500-30utxo-long/'
+        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-08-09_17-48_lognorm-static-50-5utxo/'
+        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-05-07_07-03_uniform-static-500-30utxo-ultralong/'
+        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-07-11_18-22_lognorm-static-500-5utxo/'
+        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-02-13_16-29_uniform-static-250-5utxo/'
+        all_emu_stats, all_emu = full_analyze_emulations(op.target_base_path, op.TARGET_AS, 'emu')
 
-    # Precompute and save wallet prediction matrix
-    values_range = list(range(1, 701, 1))
-    full_matrix_as25 = create_wallet_estimation_matrix(all25_stats, values_range)
-    als.save_json_to_file_pretty(os.path.join(base_path, 'wallet_estimation_matrix_ww2zksnacks.json'), full_matrix_as25)
-    full_matrix_as38 = create_wallet_estimation_matrix(all38_stats, values_range)
-    als.save_json_to_file_pretty(os.path.join(base_path, 'wallet_estimation_matrix_ww2kruw.json'), full_matrix_as38)
+    if op.PROCESS_AS25AS38:
+        op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/mn1_temp/'
+        # Full analysis of as25 and as38 client side real experiments
+        all38_stats, all38 = full_analyze_as38_202503(op.target_base_path)
+        all25_stats, all25 = full_analyze_as25_202405(op.target_base_path)
+        als.save_json_to_file_pretty(os.path.join(op.target_base_path, 'as38', 'as38_all_stats.json'), all38_stats)
+        als.save_json_to_file_pretty(os.path.join(op.target_base_path, 'as25', 'as25_all_stats.json'), all25_stats)
+        all25_1m_stats, all25_1m = full_analyze_as25_202405_only1m(op.target_base_path)
+        all25_2m_stats, all25_2m = full_analyze_as25_202405_only2m(op.target_base_path)
+
+        NARROW_FIGURES = True
+        NUM_COLUMNS = 3 if NARROW_FIGURES else 3
+        NUM_ROWS = 6     # 5
+        fig = plt.figure(figsize=(20, NUM_ROWS * 4))
+        mfig = Multifig(plt, fig, NUM_ROWS, NUM_COLUMNS)
+        mfig.add_multiple_subplots(10)
+
+        # Plot both experiments into single image
+    #    plot_ww2mix_stats(mfig, all25_stats, '25&38', '25', 'royalblue')
+        plot_ww2mix_stats(mfig, all25_1m_stats, '25&38', '25', 'royalblue')
+        plot_ww2mix_stats(mfig, all38_stats, '25&38', '38', 'lightcoral')
+        plot_ww2mix_stats(mfig, all25_2m_stats, '25&38', '25', 'darkblue')
+
+        # save graph
+        mfig.plt.suptitle(f'Combined plots as25 and as38', fontsize=16)  # Adjust the fontsize and y position as needed
+        mfig.plt.subplots_adjust(bottom=0.1, wspace=0.5, hspace=0.5)
+        save_file = os.path.join(op.target_base_path, 'as25_38_coinjoin_stats')
+        mfig.plt.savefig(f'{save_file}.png', dpi=300)
+        mfig.plt.savefig(f'{save_file}.pdf', dpi=300)
+        mfig.plt.close()
 
 
-    all38_stats, all38 = full_analyze_as38_202503(base_path)
-    all25_stats, all25 = full_analyze_as25_202405(base_path)
-    als.save_json_to_file_pretty(os.path.join(base_path, 'as38', 'as38_all_stats.json'), all38_stats)
-    als.save_json_to_file_pretty(os.path.join(base_path, 'as25', 'as25_all_stats.json'), all25_stats)
-    all25_1m_stats, all25_1m = full_analyze_as25_202405_only1m(base_path)
-    all25_2m_stats, all25_2m = full_analyze_as25_202405_only2m(base_path)
+    if op.COMPUTE_NUMWALLETS_PREDICT_MATRIX:
+        #op.target_base_path = 'c:\\!blockchains\\CoinJoin\\WasabiWallet_experiments\\mn1_temp\\'
 
-    NARROW_FIGURES = True
-    NUM_COLUMNS = 3 if NARROW_FIGURES else 3
-    NUM_ROWS = 6     # 5
-    fig = plt.figure(figsize=(20, NUM_ROWS * 4))
-    mfig = Multifig(plt, fig, NUM_ROWS, NUM_COLUMNS)
-    mfig.add_multiple_subplots(10)
+        all38_stats = als.load_json_from_file(os.path.join(op.target_base_path, 'as38', 'as38_all_stats.json'))
+        all25_stats = als.load_json_from_file(os.path.join(op.target_base_path, 'as25', 'as25_all_stats.json'))
+        visualize_estimate_wallet_bounds(op.target_base_path, all25_stats, 'as25', 'lightcoral', all38_stats, 'as38', 'royalblue')
 
-    # Plot both experiments into single image
-#    plot_ww2mix_stats(mfig, all25_stats, '25&38', '25', 'royalblue')
-    plot_ww2mix_stats(mfig, all25_1m_stats, '25&38', '25', 'royalblue')
-    plot_ww2mix_stats(mfig, all38_stats, '25&38', '38', 'lightcoral')
-    plot_ww2mix_stats(mfig, all25_2m_stats, '25&38', '25', 'darkblue')
-
-    # save graph
-    mfig.plt.suptitle(f'Combined plots as25 and as38', fontsize=16)  # Adjust the fontsize and y position as needed
-    mfig.plt.subplots_adjust(bottom=0.1, wspace=0.5, hspace=0.5)
-    save_file = os.path.join(base_path, 'as25_38_coinjoin_stats')
-    mfig.plt.savefig(f'{save_file}.png', dpi=300)
-    mfig.plt.savefig(f'{save_file}.pdf', dpi=300)
-    mfig.plt.close()
-
+        # Precompute and save wallet prediction matrix
+        values_range = list(range(1, 701, 1))
+        full_matrix_as25 = create_wallet_estimation_matrix(all25_stats, values_range)
+        als.save_json_to_file_pretty(os.path.join(op.target_base_path, 'wallet_estimation_matrix_ww2zksnacks.json'), full_matrix_as25)
+        full_matrix_as38 = create_wallet_estimation_matrix(all38_stats, values_range)
+        als.save_json_to_file_pretty(os.path.join(op.target_base_path, 'wallet_estimation_matrix_ww2kruw.json'), full_matrix_as38)
 
     # base_path = 'c:\\!blockchains\\CoinJoin\\WasabiWallet_experiments\\mn1\\tmp\\'
     # merged = merge_coins_files(base_path, 'mix2_coins.json', 'mix2_coins_20240528.json')
@@ -1240,8 +1558,19 @@ if __name__ == "__main__":
     # dmp.save_json_to_file_pretty(os.path.join(base_path, 'mix1_coins_merged.json'), merged)
     # exit(42)
 
+    #round_logs = als.parse_client_coinjoin_logs(target_path)
+    #exit(42)
+
+    # prison_logs = analyse_prison_logs(target_path)
+    # exit(42)
+
+
     # TODO: limits stats
     # TODO: Prison time distribution
     # TODO: Compute cost of mixing including hidden coordination tips
     # TODO: Compute remixed liquidity when as limited to 5
     # TODO: Add wallclock time for coinjoin
+
+
+if __name__ == "__main__":
+    main()
