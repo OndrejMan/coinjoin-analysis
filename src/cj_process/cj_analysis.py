@@ -1187,6 +1187,30 @@ def compute_link_between_inputs_and_outputs(coinjoins, sorted_cjs_in_scope):
                 coinjoins[target_output[0]]['outputs'][target_output[1]]['spend_by_txid'] = (txid, index)
                 coinjoins[txid]['inputs'][index]['spending_tx'] = (target_output[0], target_output[1])
 
+    #
+    # Update 'anon_score' item for inputs from previous outputs where exist
+    #
+    # Start with outputs - if spent, then fill anon_score
+    for cjtx in coinjoins.keys():
+        record = coinjoins[cjtx]
+        for index in record['outputs'].keys():
+            if 'spend_by_txid' in record['outputs'][index].keys():
+                txid, tx_index = record['outputs'][index]['spend_by_txid']
+                #tx_index = str(tx_index)
+                if txid in coinjoins.keys():
+                    if (txid in coinjoins.keys() and
+                            'anon_score' in coinjoins[txid]['inputs'][tx_index].keys()):
+                        assert math.isclose(coinjoins[txid]['inputs'][tx_index]['anon_score'], record['outputs'][index]['anon_score'], rel_tol=1e-9)
+                    else:
+                        coinjoins[txid]['inputs'][tx_index]['anon_score'] = record['outputs'][index]['anon_score']
+    # Fill all non-set inputs to anonscore 1.0
+    for cjtx in coinjoins.keys():
+        record = coinjoins[cjtx]
+        for index in record['inputs'].keys():
+            if 'anon_score' not in record['inputs'][index].keys():
+                record['inputs'][index]['anon_score'] = 1.0
+
+
     return coinjoins
 
 
