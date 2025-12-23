@@ -168,11 +168,11 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
                 if index < len(data[cj_session]):
                     data_cj[index].append(data[cj_session][index])
         #fig, ax_boxplot = plt.subplots(figsize=(10, 5))
-        ax_boxplot = mfig.add_subplot()  # Get next subplot
-        ax_boxplot.boxplot(data_cj)
-        ax_boxplot.set_title(title)
-        ax_boxplot.set_xlabel('Number of coinjoins executed')
-        ax_boxplot.set_ylabel(y_label)
+        # ax_boxplot = mfig.add_subplot()  # Get next subplot
+        # ax_boxplot.boxplot(data_cj)
+        # ax_boxplot.set_title(title)
+        # ax_boxplot.set_xlabel('Number of coinjoins executed')
+        # ax_boxplot.set_ylabel(y_label)
         #plt.show()
 
 
