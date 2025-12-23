@@ -845,31 +845,58 @@ def parse_sessions_from_wallets(base_path: str, coinjoins_all: dict):
     return cjtxs
 
 
-def full_analyze_emulations(base_path: str, target_as: int, exp_name_label: str):
-    # Process emulation data
-    # 1. Extract transactions info from block_xxx.json to (many) txid.json files
-    block_files = list(Path(os.path.join(base_path, 'data', 'btc-node')).glob('block_*.json'))
+def extract_tx_info_from_blocks(target_path: str):
+    """
+    Extract all transactions from 'block_*.json' files in target directory target_path/btc-node
+    and save these as 'txid.json'. The saved files are in target_path/txid.json
+    :param target_path: path with sub-folder 'btc-node' containing 'block_*.json' files
+    :return:
+    """
+    block_files = list(Path(os.path.join(target_path, 'btc-node')).glob('block_*.json'))
     for block_file in block_files:
         block = als.load_json_from_file(block_file)
         for tx in block['tx']:
             out = {'result': tx, 'error': None, 'id': 'curltest'}
-            als.save_json_to_file(os.path.join(base_path, 'data', f"{tx['txid']}.json"), out)
+            als.save_json_to_file(os.path.join(target_path, f"{tx['txid']}.json"), out)
 
-    # 2. Create directly xxx_coinjoin_tx_info.json with each wallet being one 'session'.
-    # Use pre-created coinjoin_tx_info.json, filter out all transactions and ins/outs not belonging to this wallet
+
+def full_analyze_emulations(base_path: str, target_as: int, exp_name_label: str):
+    """
+    Process data files from coinjoin emulations and produce graphs. Each participating wallet is treated as separate
+    entity, resulting in one "session" for subsequent analysis.
+    Expects downloaded blocks and files 'coinjoin_tx_info.json' and 'wallets_coins.json' extracted by parse_cj_logs.py
+    :param base_path: root directory with emulation files
+    :param target_as: anon score set for clients in this experiment
+    :param exp_name_label: custom label for this experiment
+    :return: processed coinjoins, statistics and generated graphs
+    """
+    # Extract transactions info from block_xxx.json to (many) txid.json files
+    extract_tx_info_from_blocks(os.path.join(base_path, 'data'))
+
+    # Create directly xxx_coinjoin_tx_info.json with each wallet being one 'session'.
+    # Use pre-created coinjoin_tx_info.json, filter out all transactions and ins/outs not belonging
+    # to a specific wallet
     coinjoins_all = als.load_json_from_file(os.path.join(base_path, 'coinjoin_tx_info.json'))
     cjtxs = parse_sessions_from_wallets(base_path, coinjoins_all)
     als.save_json_to_file_pretty(os.path.join(base_path, f'{exp_name_label}_coinjoin_tx_info.json'), cjtxs)
 
+    # Compute statistics
     stats = compute_multisession_statistics(cjtxs, coinjoins_all['coinjoins'], '', target_as)
     als.save_json_to_file_pretty(os.path.join(base_path, f'{exp_name_label}_stats.json'), stats)
 
+    # Plot results
     plot_client_experiments_graphs(cjtxs, stats, target_as, base_path)
 
     return cjtxs, stats
 
 
 def full_analyze_as25_202405(base_path: str):
+    """
+    Analyze and plot results for real client-side experiment for zksnacks coordinator in 05/2024,
+     with wallet's anonscore target set to 25.
+    :param base_path: base directory with client-side files
+    :return:
+    """
     # Experiment configuration
     target_path = os.path.join(base_path, 'as25\\')
     experiment_start_cut_date = '2024-05-14T19:02:49+00:00'  # AS=25 experiment start time
@@ -907,6 +934,12 @@ def full_analyze_as25_202405_only2m(base_path: str):
 
 
 def full_analyze_as38_202503(base_path: str):
+    """
+    Analyze and plot results for real client-side experiment for kruw.io coordinator in 03/2025,
+     with wallet's anonscore target set to 38.
+    :param base_path: base directory with client-side files
+    :return:
+    """
     # Experiment configuration
     target_path = os.path.join(base_path, 'as38\\')
     experiment_start_cut_date = '2025-03-09T00:02:49+00:00'  # AS=38 experiment start time
