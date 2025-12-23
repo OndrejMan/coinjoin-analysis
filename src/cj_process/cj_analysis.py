@@ -1421,7 +1421,7 @@ def compute_partial_vsize(tx_hex: str, input_indices: list[int], output_indices:
     filtered_tx = CMutableTransaction(mutable_tx.vin, mutable_tx.vout, mutable_tx.nLockTime, mutable_tx.nVersion, CTxWitness(filtered_tx2_witness))
 
     # Difference between original and filtered transaction is the contribution by the specified inputs and outputs
-    filtered_weight = original_tx.calc_weight() - filtered_tx.calc_weight()
+    filtered_weight = original_tx.calc_weight() - filtered_tx.calc_weight() if len(filtered_tx.vin) > 0 else original_tx.calc_weight()
     filtered_vsize = math.ceil(filtered_weight / 4)
 
     return filtered_vsize, orig_vsize
