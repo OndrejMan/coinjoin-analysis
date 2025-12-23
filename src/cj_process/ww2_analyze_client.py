@@ -703,7 +703,15 @@ def analyse_prison_logs(target_path: str):
     # print(f"Index: {index}")
 
 
-def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title):
+def plot_scatter(mfig: Multifig, x, y, x_label, y_label, title, color: str):
+    ax = mfig.add_subplot()
+    ax.scatter(x, y, color=color, s=5)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+
+
+def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title, annotate_cells: bool):
     heatmap_size = (max(x), max(y))
     heatmap, xedges, yedges = np.histogram2d(x, y, bins=heatmap_size)
 
@@ -714,16 +722,33 @@ def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title):
     #sns.set_style("whitegrid")
     sns.set_style("white")
 #    sns.heatmap(heatmap_percentage.T, cmap='viridis', annot=True, fmt='.1f', cbar=True, ax=ax)
-    sns.heatmap(heatmap_percentage.T, cmap='coolwarm', annot=True, annot_kws={"size": 6}, fmt='.1f', cbar=True, ax=ax, linecolor='white')
+    sns.heatmap(heatmap_percentage.T, cmap='coolwarm', annot=annotate_cells, annot_kws={"size": 6}, fmt='.1f', cbar=True, ax=ax, linecolor='white')
 
     ax.invert_yaxis()
 
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_xticks(np.arange(len(xedges) - 1) + 0.5)
-    ax.set_yticks(np.arange(len(yedges) - 1) + 0.5)
-    ax.set_xticklabels(np.arange(1, len(xedges)))
-    ax.set_yticklabels(np.arange(1, len(yedges)))
+
+    max_ticks = 10
+    n_x = len(xedges) - 1
+    n_y = len(yedges) - 1
+    step_x = max(1, math.ceil(n_x / max_ticks))
+    step_y = max(1, math.ceil(n_y / max_ticks))
+    # Tick positions (centered)
+    x_ticks = np.arange(0, n_x, step_x) + 0.5
+    y_ticks = np.arange(0, n_y, step_y) + 0.5
+    # Tick labels (1-based indexing)
+    x_labels = np.arange(1, n_x + 1, step_x)
+    y_labels = np.arange(1, n_y + 1, step_y)
+    ax.set_xticks(x_ticks)
+    ax.set_yticks(y_ticks)
+    ax.set_xticklabels(x_labels)
+    ax.set_yticklabels(y_labels)
+
+    # ax.set_xticks(np.arange(len(xedges) - 1) + 0.5)
+    # ax.set_yticks(np.arange(len(yedges) - 1) + 0.5)
+    # ax.set_xticklabels(np.arange(1, len(xedges)))
+    # ax.set_yticklabels(np.arange(1, len(yedges)))
     ax.set_title(title)
     #plt.show()
 
@@ -1001,12 +1026,31 @@ def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, experiment_ta
                        len(all_stats['num_wallet_coins']),
                        f'{experiment_target_anonscore}', '# coins', 'royalblue')
 
+    # Plot heatmap of relation between number of registered inputs and outputs
     x, y = [], []
     for session in all_stats['num_inputs'].keys():
         x.extend(all_stats['num_inputs'][session])
         y.extend(all_stats['num_outputs'][session])
     title = 'Frequency of inputs to outputs pairs' if LONG_LEGEND else 'Freq. of input/output nums'
-    plot_cj_heatmap(mfig, x, y, 'number of inputs', 'number of outputs', title)
+    plot_cj_heatmap(mfig, x, y, 'number of inputs', 'number of outputs', title, True)
+
+    # Plot correlation of total coins in wallet and number of registered inputs/outputs
+    x, y_ins, y_outs = [], [], []
+    for session in all_stats['num_wallet_coins'].keys():
+        x.extend(all_stats['num_wallet_coins'][session])
+        y_ins.extend(all_stats['num_inputs'][session])
+        y_outs.extend(all_stats['num_outputs'][session])
+    title = 'Number of inputs/outputs to coins in wallet' if LONG_LEGEND else 'Num. ins/outs to total coins'
+    plot_cj_heatmap(mfig, x, y_ins, 'number of coins', 'number of inputs', title, False)
+    plot_cj_heatmap(mfig, x, y_outs, 'number of coins', 'number of outputs', title, False)
+    # Plot the same as colored scatterplot
+    ax = mfig.add_subplot()
+    ax.scatter(x, y_ins, color='red', s=1, alpha=0.3)
+    ax.scatter(x, y_outs, color='green', s=1, alpha=0.3)
+    ax.set_xlabel('number of coins')
+    ax.set_ylabel('number of inputs/outputs')
+    ax.set_title(title)
+
 
     # Plot histogram of hidden coordination fees (cfee)
     ax = mfig.add_subplot()
