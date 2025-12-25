@@ -34,6 +34,7 @@ pip install -r requirements.txt
     1. [Execute EmuCoinJoin emulator](#run-ecj)
     1. [Extract coinjoin information from original raw files (```--action collect_docker```)](#ecj-extract)
     1. [Re-run analysis from already extracted coinjoins (```--action analyze_only```)](#ecj-rerun)
+    1. [Run client-side analysis from already extracted coinjoins (```ww2_analyze_client.py --action process_emulations```)](#ecj-client-analysis)
     1. [Example results](#ecj-examples)
 ---
 
@@ -181,8 +182,24 @@ If the analysis finishes successfully, the following files are created:
   * ```coinjoin_stats.3.pdf, coinjoin_stats.3.pdf``` ... multiple graphs capturing various analysis results obtained from coinjoin data. 
   * ```coinjoin_tx_info_stats.json``` ... captures information about the participation of every wallet in a given coinjoin transaction.
 
+
+<a id="ecj-client-analysis"></a>
+### 4. Run client-side analysis from already extracted coinjoins  (``ww2_analyze_client.py --action process_emulations```)
+Additional analysis of client-side data collected from emulations or real coinjoin participation In both cases, ```coinjoin_tx_info.json``` files are already expected to exist, run:
+```
+ww2_analyze_client.py --action process_emulations --target-path path_to_experiments
+```
+
+If the analysis finishes successfully, the following files are created:
+  * ```asX_coinjoin_stats.pdf/png``` ... multiple graphs capturing various analysis results obtained from client-side coinjoin data. 
+  * ```emu_stats.json`` ... raw values used to generate asX_coinjoin_stats.pdf/png graphs
+  * ```coinjoin_tx_info_stats.json`` ... basic extracted statistics for each wallet 
+  * ```emu_coinjoin_tx_info.json`` ... coinjoin_tx_info.json with additional metadata extracted
+
+
+
 <a id="ecj-examples"></a>
-### 4. Example results
+### 5. Example results
 ![image](https://github.com/user-attachments/assets/2e5406bc-b8f8-4725-8ff9-6484e805f682)
 
 ![image](https://github.com/user-attachments/assets/5325a4ae-468b-4b52-b58f-95d521c15b1c)
