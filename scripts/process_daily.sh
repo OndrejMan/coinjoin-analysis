@@ -65,6 +65,8 @@ $BASE_PATH/btc/coinjoin-analysis/scripts/visualize_sw.sh
 #
 source $BASE_PATH/btc/coinjoin-analysis/venv/bin/activate 
 cd $BASE_PATH/btc/coinjoin-analysis/src
+# Remove success flag
+rm -f $TMP_DIR/Scanner/summary_processing.success 
 python3 -m cj_process.file_check $TMP_DIR/Scanner/  | tee parse_dumplings.py.log
 
 # Summary of executed analysis
