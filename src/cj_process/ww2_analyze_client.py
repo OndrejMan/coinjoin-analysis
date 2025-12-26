@@ -10,11 +10,12 @@ import ast
 import seaborn as sns
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 from scipy.interpolate import CubicSpline
 from typing import Iterable, Dict, Tuple, List
 
 import cj_analysis as als
-from collections import defaultdict
+from collections import defaultdict, Counter
 import argparse
 
 # Suppress DEBUG logs from a specific library
@@ -156,6 +157,7 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
     ax.set_title(f'{title}', fontsize=FONT_SIZE_SMALLER)
     ax.set_xlabel('Number of coinjoins executed', fontsize=FONT_SIZE_SMALLER)
     ax.set_ylabel(y_label, fontsize=FONT_SIZE_SMALLER)
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     #plt.show()
 
     PLOT_BOXPLOT = False
@@ -255,6 +257,7 @@ def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str,
     stats['observed_remix_inputs_ratio_cumul'] = {}     # unused now, remix liquidity based on number of inputs
     stats['anonscore_coins_distribution'] = {}
     stats['num_wallet_coins'] = {}
+    stats['wallet_coins_values'] = {}
     for session_label in cjtxs['sessions'].keys():
         session_coins = {}
         anon_percentage_status_list = []
@@ -265,6 +268,7 @@ def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str,
         observed_remix_inputs_ratio_cumul_list = []
         anonscore_coins_distribution_list = []
         num_wallet_coins_list = []
+        wallet_coins_values_list = []
         session_size_inputs = cjtxs['sessions'][session_label]['funding_tx']['value']
         assert session_size_inputs > 0, f'Unexpected negative funding tx size of {session_size_inputs}'
         cj_index = 0
@@ -344,6 +348,9 @@ def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str,
             #
             anonscore_coins_distribution_list.append([session_coins[address]['anon_score'] for address in session_coins.keys()])
 
+            for coin in session_coins:
+                wallet_coins_values_list.append(session_coins[coin]['value'])
+
         # Store computed data
         if len(anon_percentage_status_list) > 0:
             assert session_label not in stats['anon_percentage_status'], f'Duplicate session label {session_label}'
@@ -362,6 +369,9 @@ def compute_multisession_statistics(cjtxs: dict, coinjoins: dict, mix_name: str,
         if len(num_wallet_coins_list) > 0:
             assert session_label not in stats['num_wallet_coins'], f'Duplicate session label {session_label}'
             stats['num_wallet_coins'][session_label] = num_wallet_coins_list
+        if len(wallet_coins_values_list) > 0:
+            assert session_label not in stats['wallet_coins_values'], f'Duplicate session label {session_label}'
+            stats['wallet_coins_values'][session_label] = wallet_coins_values_list
         # Print finalized info
         session = cjtxs['sessions'][session_label]
         session_end_merge_tx = f'{len(session['coinjoins'].keys())} cjs | ' + session['funding_tx']['label'] + ' ' + session['funding_tx']['broadcast_time'] + ' ' + \
@@ -711,18 +721,26 @@ def plot_scatter(mfig: Multifig, x, y, x_label, y_label, title, color: str):
     ax.set_title(title)
 
 
-def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title, annotate_cells: bool):
-    heatmap_size = (max(x), max(y))
-    heatmap, xedges, yedges = np.histogram2d(x, y, bins=heatmap_size)
-
+def plot_cj_heatmap(mfig: Multifig, x, y, x_label, y_label, title, annotate_cells: bool, normalize_y: bool=False):
     ax = mfig.add_subplot()
-    #sns.heatmap(heatmap.T, cmap='viridis', annot=True, fmt='.0f', cbar=True, ax=ax)
-    heatmap_percentage = (heatmap / np.sum(heatmap)) * 100
-    #print(f'{heatmap_percentage}')
-    #sns.set_style("whitegrid")
-    sns.set_style("white")
-#    sns.heatmap(heatmap_percentage.T, cmap='viridis', annot=True, fmt='.1f', cbar=True, ax=ax)
-    sns.heatmap(heatmap_percentage.T, cmap='coolwarm', annot=annotate_cells, annot_kws={"size": 6}, fmt='.1f', cbar=True, ax=ax, linecolor='white')
+
+    x_edges = np.arange(min(x), max(x) + 2)
+    y_edges = np.arange(min(y), max(y) + 2)
+    heatmap, xedges, yedges = np.histogram2d(x, y, bins=[x_edges, y_edges])
+
+    if normalize_y:
+        # normalize so for each x-bin, sum over y is 1
+        row_sums = heatmap.sum(axis=1, keepdims=True)  # per-x totals
+        heatmap = np.divide(heatmap, row_sums, out=np.zeros_like(heatmap), where=row_sums > 0)
+        heatmap_percentage = heatmap * 100
+        sns.heatmap(heatmap_percentage.T, cmap='coolwarm', annot=annotate_cells,
+                    annot_kws={"size": 6}, fmt='.1f', cbar=True, ax=ax, linecolor='white')
+    else:
+        # Standard heatmap scaled to 100%
+        heatmap_percentage = (heatmap / np.sum(heatmap)) * 100
+        sns.set_style("white")
+        sns.heatmap(heatmap_percentage.T, cmap='coolwarm', annot=annotate_cells, annot_kws={"size": 6}, fmt='.1f',
+                    cbar=True, ax=ax, linecolor='white')
 
     ax.invert_yaxis()
 
@@ -910,7 +928,7 @@ def full_analyze_emulations(base_path: str, target_as: int, exp_name_label: str)
     als.save_json_to_file_pretty(os.path.join(base_path, f'{exp_name_label}_stats.json'), stats)
 
     # Plot results
-    plot_client_experiments_graphs(cjtxs, stats, target_as, base_path)
+    plot_client_experiments_graphs(cjtxs, stats, 'emul', target_as, base_path, True)
 
     return cjtxs, stats
 
@@ -932,7 +950,7 @@ def full_analyze_as25_202405(base_path: str):
     # Generate download scripts for wallet transactions
     create_download_script(wallets_names, target_path, 'download_as25.sh')
 
-    return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
+    return analyze_ww2_artifacts(target_path, 'all', experiment_start_cut_date, experiment_target_anonscore,
                           wallets_names, problematic_sessions, 23)
 
 
@@ -943,7 +961,7 @@ def full_analyze_as25_202405_only1m(base_path: str):
     experiment_target_anonscore = 25
     problematic_sessions = ['mix1 0.1btc | 12 cjs | txid: 34', 'mix2 0.2btc']  # Remove all 0.2 sessions + one problematic 0.1
     wallets_names = ['mix1', 'mix2', 'mix3']
-    return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
+    return analyze_ww2_artifacts(target_path, 'only0.1btc', experiment_start_cut_date, experiment_target_anonscore,
                           wallets_names, problematic_sessions, 16, '_0.1btc_')
 
 
@@ -954,7 +972,7 @@ def full_analyze_as25_202405_only2m(base_path: str):
     experiment_target_anonscore = 25
     problematic_sessions = ['mix1 0.1', 'mix2 0.1', 'mix3 0.1']  # remove all 0.1 sessions
     wallets_names = ['mix1', 'mix2', 'mix3']
-    return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
+    return analyze_ww2_artifacts(target_path, 'only0.2btc', experiment_start_cut_date, experiment_target_anonscore,
                           wallets_names, problematic_sessions, 7, '_0.2btc_')
 
 
@@ -976,15 +994,21 @@ def full_analyze_as38_202503(base_path: str):
     # Generate download scripts for wallet transactions
     create_download_script(wallets_names, target_path, 'download_as38.sh')
 
-    return analyze_ww2_artifacts(target_path, experiment_start_cut_date, experiment_target_anonscore,
+    return analyze_ww2_artifacts(target_path, 'all', experiment_start_cut_date, experiment_target_anonscore,
                           wallets_names, problematic_sessions, 23)
 
 
-def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, experiment_target_anonscore: int, target_path: str):
-    NUM_COLUMNS = 3  # 4
-    NUM_ROWS = 6  # 5
-    # fig = plt.figure(figsize=(20, NUM_ROWS * 2.5))
-    fig = plt.figure(figsize=(10, NUM_ROWS * 2.5))
+def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, exp_label: str, experiment_target_anonscore: int,
+                                   target_path: str, wide_fig: bool):
+    if wide_fig:
+        NUM_COLUMNS = 4
+        NUM_ROWS = 5
+        fig = plt.figure(figsize=(20, NUM_ROWS * 2.5))
+    else:
+        NUM_COLUMNS = 3
+        NUM_ROWS = 6
+        fig = plt.figure(figsize=(10, NUM_ROWS * 2.5))
+
     mfig = Multifig(plt, fig, NUM_ROWS, NUM_COLUMNS)
 
     # Plot graphs
@@ -1040,17 +1064,23 @@ def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, experiment_ta
         x.extend(all_stats['num_wallet_coins'][session])
         y_ins.extend(all_stats['num_inputs'][session])
         y_outs.extend(all_stats['num_outputs'][session])
-    title = 'Number of inputs/outputs to coins in wallet' if LONG_LEGEND else 'Num. ins/outs to total coins'
+    title = 'Number of inputs to coins in wallet' if LONG_LEGEND else 'Num. inputs to total coins'
     plot_cj_heatmap(mfig, x, y_ins, 'number of coins', 'number of inputs', title, False)
+    title = 'Number of outputs to coins in wallet' if LONG_LEGEND else 'Num. outputs to total coins'
     plot_cj_heatmap(mfig, x, y_outs, 'number of coins', 'number of outputs', title, False)
-    # Plot the same as colored scatterplot
-    ax = mfig.add_subplot()
-    ax.scatter(x, y_ins, color='red', s=1, alpha=0.3)
-    ax.scatter(x, y_outs, color='green', s=1, alpha=0.3)
-    ax.set_xlabel('number of coins')
-    ax.set_ylabel('number of inputs/outputs')
-    ax.set_title(title)
+    # Plot the same, but normalized
+    title = 'Number of inputs to coins in wallet (norm)' if LONG_LEGEND else 'Num. inputs to total coins (norm)'
+    plot_cj_heatmap(mfig, x, y_ins, 'number of coins', 'number of inputs', title, False, True)
+    title = 'Number of outputs to coins in wallet (norm)' if LONG_LEGEND else 'Num. outputs to total coins (norm)'
+    plot_cj_heatmap(mfig, x, y_outs, 'number of coins', 'number of outputs', title, False, True)
 
+    # # Plot the same as colored scatterplot
+    # ax = mfig.add_subplot()
+    # ax.scatter(x, y_ins, color='red', s=1, alpha=0.3)
+    # ax.scatter(x, y_outs, color='green', s=1, alpha=0.3)
+    # ax.set_xlabel('number of coins')
+    # ax.set_ylabel('number of inputs/outputs')
+    # ax.set_title(title)
 
     # Plot histogram of hidden coordination fees (cfee)
     ax = mfig.add_subplot()
@@ -1090,6 +1120,25 @@ def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, experiment_ta
     title = 'Distribution of anonscores at the end of mixing sessions' if LONG_LEGEND else 'Final anonscores distribution'
     ax.set_title(title)
     ax.legend()
+
+    # Plot frequency of values in coins
+    ax = mfig.add_subplot()
+    data_coinvalues = []
+    for session_label in all_stats['wallet_coins_values'].keys():
+        data_coinvalues.extend(all_stats['wallet_coins_values'][session_label])
+    counts = Counter(data_coinvalues)
+    items = sorted(counts.items(), key=lambda kv: kv[0])
+    labels = [k for k, v in items]  # x values
+    values = [v for k, v in items]  # counts
+    x = np.arange(len(labels))
+    ax.bar(x, values, width=0.9)
+    n_ticks = 10
+    tick_idx = np.linspace(0, len(labels) - 1, n_ticks, dtype=int)
+    ax.set_xticks(tick_idx, [labels[i] for i in tick_idx], rotation=90)
+    ax.set_xlabel('values (sats)')
+    ax.set_ylabel('# occurences')
+    ax.set_title('Distribution of output values' if LONG_LEGEND else 'Output values distribution')
+
 
     sessions_lengths = [len(all_cjs['sessions'][session]['coinjoins']) for session in all_cjs['sessions'].keys()]
     print(f'Total sessions={len(all_cjs['sessions'].keys())}, total coinjoin txs={sum(sessions_lengths)}')
@@ -1147,13 +1196,13 @@ def plot_client_experiments_graphs(all_cjs: dict, all_stats: dict, experiment_ta
     mfig.plt.suptitle(f'as{experiment_target_anonscore}',
                       fontsize=16)  # Adjust the fontsize and y position as needed
     mfig.plt.subplots_adjust(bottom=0.1, wspace=0.5, hspace=0.5)
-    save_file = os.path.join(target_path, f'as{experiment_target_anonscore}_coinjoin_stats')
+    save_file = os.path.join(target_path, f'as{experiment_target_anonscore}_{exp_label}_coinjoin_stats')
     mfig.plt.savefig(f'{save_file}.png', dpi=300)
     mfig.plt.savefig(f'{save_file}.pdf', dpi=300)
     mfig.plt.close()
 
 
-def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, experiment_target_anonscore: int,
+def analyze_ww2_artifacts(target_path: str, exp_label: str, experiment_start_cut_date: str, experiment_target_anonscore: int,
                           wallets_names: list, problematic_sessions: list, assert_num_expected_sessions: int, addon_label: str=""):
     all_cjs = {}
     all_stats = {}
@@ -1208,7 +1257,7 @@ def analyze_ww2_artifacts(target_path: str, experiment_start_cut_date: str, expe
     save_path = os.path.join(target_path, f'as{experiment_target_anonscore}{addon_label}stats.json')
     als.save_json_to_file_pretty(save_path, all_stats)
 
-    plot_client_experiments_graphs(all_cjs, all_stats, experiment_target_anonscore, target_path)
+    plot_client_experiments_graphs(all_cjs, all_stats, exp_label, experiment_target_anonscore, target_path, True)
 
     return all_stats, all_cjs
 
