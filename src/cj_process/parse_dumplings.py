@@ -3491,7 +3491,23 @@ def main(argv=None):
 
             coord_tx_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord_discovered_renamed.json'))
             selected_coords_default = ["kruw", "mega", "btip", "gingerwallet", "wasabicoordinator", "coinjoin_nl",
-                               "opencoordinator", "dragonordnance", "wasabist", "strange_2025", "unknown_2024_e85631", "unknown_2024_28ce7b"]
+                                       "opencoordinator", "dragonordnance", "wasabist", "strange_2025",
+                                       "unknown_2024_e85631", "unknown_2024_28ce7b"]
+
+            EXTRACT_stdenom_rbf_notap_onechange_MIX = True
+            if EXTRACT_stdenom_rbf_notap_onechange_MIX:
+                # Add special ww2 transactions "stdenom_rbf_notap_onechange" (likely false positives) into extracted pools for investigation
+                false_cjtx = als.load_json_from_file(os.path.join(target_path, 'wasabi2', 'false_cjtxs.json'))
+                if "stdenom_rbf_notap_onechange" in false_cjtx.keys():
+                    coord_tx_mapping["unknown_stdenom_rbf_notap_onechange"] = false_cjtx["stdenom_rbf_notap_onechange"]
+                    selected_coords_default.append('unknown_stdenom_rbf_notap_onechange')
+                not_found = 0
+                for txid in coord_tx_mapping["unknown_stdenom_rbf_notap_onechange"]:
+                    if txid not in data['coinjoins'].keys():
+                        print(f'{txid} not in coinjoins')
+                        not_found += 1
+                print(f'Total NOT found unknown_stdenom_rbf_notap_onechange: {not_found} from {len(coord_tx_mapping["unknown_stdenom_rbf_notap_onechange"])}')
+
             # Force MIX_IDS subset if required
             selected_coords = selected_coords_default if op.MIX_IDS == "" else op.MIX_IDS
             write_to_file(f'{cmd_str} wasabi2_extract_other_pools', operation_file, 'w')
@@ -3507,6 +3523,14 @@ def main(argv=None):
                                                               'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None,
                                                               op.SAVE_BASE_FILES_JSON, True)
                 logging.info(f'done for {pool_name}) *****************************')
+
+            if EXTRACT_stdenom_rbf_notap_onechange_MIX:
+                # Create special false_cjtxs.json in wasabi2_unknown_stdenom_rbf_notap_onechange folder without stdenom_rbf_notap_onechange
+                false_cjtx = als.load_json_from_file(os.path.join(target_path, 'wasabi2', 'false_cjtxs.json'))
+                if "stdenom_rbf_notap_onechange" in false_cjtx.keys():
+                    false_cjtx.pop("stdenom_rbf_notap_onechange")
+                als.save_json_to_file_pretty(os.path.join(target_path, 'wasabi2_unknown_stdenom_rbf_notap_onechange', 'false_cjtxs.json'), false_cjtx)
+
 
         if op.CJ_TYPE == CoinjoinType.WW1:
             data = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi1'), None, False)
