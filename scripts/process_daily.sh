@@ -85,7 +85,7 @@ SOURCE_DIR=$(realpath "$TMP_DIR")
 DEST_DIR=$(realpath "$DEST_DIR")
 
 # Use find to locate all .json files except info_*.json and copy them while preserving structure
-find "$TMP_DIR" -type f \( -name "*.json" -o -name "*.pdf" -o -name "*.png" -o -name "*.html" -o -name "coinjoin_results_check_summary.txt" \) ! -name "coinjoin_tx_info*.json" ! -name "*_events.json" ! -name "*_false_filtered_cjtxs.json" | while read -r file; do
+find "$TMP_DIR" -type f \( -name "*.json" -o -name "*.pdf" -o -name "*.png" -o -name "*.html" -o -name "coinjoin_results_check_summary.txt" -o -name "summary_processing_info.txt -o -name summary_processing.success" \) ! -name "coinjoin_tx_info*.json" ! -name "*_events.json" ! -name "*_false_filtered_cjtxs.json" | while read -r file; do
     # Compute relative path
     REL_PATH="${file#$SOURCE_DIR/}"
     # Create target directory if it does not exist
