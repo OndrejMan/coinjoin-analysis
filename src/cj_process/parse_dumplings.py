@@ -2513,7 +2513,8 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
     else:
         coords = []
         if mix_protocol == CoinjoinType.WW2:
-            coords = [('wasabi2', coord_name) for coord_name in cjc.WASABI2_COORD_NAMES_ALL]
+            mix_ids = cjc.WASABI2_COORD_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
+            coords = [('wasabi2', coord_name) for coord_name in mix_ids]
             coords.append(('wasabi2', ''))  # Add record or all coordinators together
         if mix_protocol == CoinjoinType.WW1:
             coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
