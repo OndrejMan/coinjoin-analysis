@@ -1463,10 +1463,14 @@ def visualize_estimate_wallet_bounds(base_path: str, cj_stats1: dict, prefix1: s
         plot_wallets_stats(values_range, N_hat_list, ci_lo_list, ci_hi_list, line_color, prefix)
         return precomputed
 
-    compute_and_plot(cj_stats2, 'num_outputs', 'green', f'{prefix2} [outputs]')
-    compute_and_plot(cj_stats1, 'num_outputs', 'blue', f'{prefix1} [outputs]')
-    compute_and_plot(cj_stats2, 'num_inputs', 'magenta', f'{prefix2} [inputs]')
-    compute_and_plot(cj_stats1, 'num_inputs', 'red', f'{prefix1} [inputs]')
+    if cj_stats2:
+        compute_and_plot(cj_stats2, 'num_outputs', 'green', f'{prefix2} [outputs]')
+    if cj_stats1:
+        compute_and_plot(cj_stats1, 'num_outputs', 'blue', f'{prefix1} [outputs]')
+    if cj_stats2:
+        compute_and_plot(cj_stats2, 'num_inputs', 'magenta', f'{prefix2} [inputs]')
+    if cj_stats1:
+        compute_and_plot(cj_stats1, 'num_inputs', 'red', f'{prefix1} [inputs]')
     # compute_and_plot(cj_stats1, 'num_inputs', color1, f'{prefix1}_in')
     # compute_and_plot(cj_stats1, 'num_outputs', 'coral', f'{prefix1}_out')
     # compute_and_plot(cj_stats2, 'num_inputs', color2, f'{prefix2}_in')
@@ -1624,12 +1628,15 @@ def main(argv=None):
     if op.PROCESS_EMULATIONS:
         als.SORT_COINJOINS_BY_RELATIVE_ORDER = False
 
-        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-04-17_12-26_uniform-static-500-30utxo-long/'
-        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-08-09_17-48_lognorm-static-50-5utxo/'
-        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-05-07_07-03_uniform-static-500-30utxo-ultralong/'
-        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-07-11_18-22_lognorm-static-500-5utxo/'
-        #op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/em1/300blocks-lognorm-as25/2024-02-13_16-29_uniform-static-250-5utxo/'
-        all_emu_stats, all_emu = full_analyze_emulations(op.target_base_path, op.TARGET_AS, 'emu')
+        # Analyze produced emulations and plot graphs
+        all_emu, all_emu_stats = full_analyze_emulations(op.target_base_path, op.TARGET_AS, 'emu')
+        # Plot estimated prediction error bounds
+        visualize_estimate_wallet_bounds(op.target_base_path, all_emu_stats, 'emu', 'lightcoral', None, '', 'royalblue')
+        # Precompute and save wallet prediction matrix
+        values_range = list(range(1, 701, 1))
+        full_matrix_emu = create_wallet_estimation_matrix(all_emu_stats, values_range)
+        als.save_json_to_file_pretty(os.path.join(op.target_base_path, 'wallet_estimation_matrix_emul.json'), full_matrix_emu)
+
 
     if op.PROCESS_AS25AS38:
         op.target_base_path = 'c:/!blockchains/CoinJoin/WasabiWallet_experiments/mn1_temp/'
