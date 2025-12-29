@@ -1619,8 +1619,7 @@ class ClientParseOptions:
 def main(argv=None):
     global op
     op = ClientParseOptions()
-    # parse arguments, overwrite default settings if required
-    args = parse_arguments(argv)
+    args = parse_arguments(argv)  # parse arguments, overwrite default settings if required
     op.set_args(args)
 
     als.SORT_COINJOINS_BY_RELATIVE_ORDER = False
@@ -1684,24 +1683,14 @@ def main(argv=None):
         full_matrix_as38 = create_wallet_estimation_matrix(all38_stats, values_range)
         als.save_json_to_file_pretty(os.path.join(op.target_base_path, 'wallet_estimation_matrix_ww2kruw.json'), full_matrix_as38)
 
-    # base_path = 'c:\\!blockchains\\CoinJoin\\WasabiWallet_experiments\\mn1\\tmp\\'
-    # merged = merge_coins_files(base_path, 'mix2_coins.json', 'mix2_coins_20240528.json')
-    # dmp.save_json_to_file_pretty(os.path.join(base_path, 'mix2_coins_merged.json'), merged)
-    # merged = merge_coins_files(base_path, 'mix1_coins.json', 'mix1_coins_20240528.json')
-    # dmp.save_json_to_file_pretty(os.path.join(base_path, 'mix1_coins_merged.json'), merged)
-    # exit(42)
-
     #round_logs = als.parse_client_coinjoin_logs(target_path)
     #exit(42)
 
     # prison_logs = analyse_prison_logs(target_path)
     # exit(42)
 
-
     # TODO: limits stats
     # TODO: Prison time distribution
-    # TODO: Compute cost of mixing including hidden coordination tips
-    # TODO: Compute remixed liquidity when as limited to 5
     # TODO: Add wallclock time for coinjoin
 
 
