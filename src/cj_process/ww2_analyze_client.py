@@ -56,11 +56,11 @@ class Multifig:
         return self.axes[index]
 
 
-def plot_cj_anonscores(mfig: Multifig, data: dict, title: str, total_sessions: int, anon_score: str, y_label: str, color: str, show_txid: bool = False):
-    plot_cj_anonscores_ax(mfig.add_subplot(), data, title, total_sessions, anon_score, y_label, color, show_txid)
+def plot_cj_anonscores(mfig: Multifig, data: dict, title: str, total_sessions: int, anon_score: str, y_label: str, color: str, avg_color: str='red'):
+    plot_cj_anonscores_ax(mfig.add_subplot(), data, title, total_sessions, anon_score, y_label, color, avg_color)
 
 
-def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_score: str, y_label: str, line_color: str, show_txid: bool = False):
+def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_score: str, y_label: str, line_color: str, avg_color: str='red'):
     size_01_used = False
     size_02_used = False
     size_emul_used = False
@@ -107,20 +107,19 @@ def plot_cj_anonscores_ax(ax, data: dict, title: str, total_sessions: int, anon_
         values = [lists[lst][index] for lst in lists.keys() if index < len(lists[lst])]
         if not values:
             return 0
-        return (sum(values) / len(values), len(values))
+        return sum(values) / len(values), len(values)
 
     max_index = max([len(data[cj_session]) for cj_session in data.keys()])
     avg_data = [compute_average_at_index(data, index)[0] for index in range(0, max_index)]
     num_at_index_data = [compute_average_at_index(data, index)[1] for index in range(0, max_index)]
-    x_vals = range(1, len(avg_data) + 1)
 
     PLOT_BASIC_AVERAGE = True
     if PLOT_BASIC_AVERAGE:
-        line_color = 'red'
         label = f'Average (as={anon_score})' if LONG_LEGEND else f'AVG (as={anon_score})'
-        ax.plot(range(1, len(avg_data) + 1), avg_data, label=label, linestyle='solid',
-                linewidth=7, alpha=0.7, color=line_color)
-    else:
+        x_vals = range(1, len(avg_data) + 1)
+        ax.plot(x_vals, avg_data, label=label, linestyle='solid',
+                linewidth=7, alpha=0.7, color=avg_color)
+    else:  # Plotting variable thickness average
         values_at_index = {}
         # Populate dictionary with values at each index
         for cj_session in data.keys():
@@ -1250,52 +1249,52 @@ def analyze_ww2_artifacts(target_path: str, exp_label: str, experiment_start_cut
     return all_stats, all_cjs
 
 
-def plot_ww2mix_stats(mfig, all_stats: dict, experiment_label: str, experiment_target_anonscore: str, color: str):
+def plot_ww2mix_stats(mfig, all_stats: dict, experiment_label: str, experiment_target_anonscore: str, color: str, avg_color: str):
     # Plot graphs
     index = 0
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['anon_percentage_status'], f'Progress towards fully anonymized liquidity (as={experiment_label})', len(all_stats['anon_percentage_status']),
-                       experiment_target_anonscore, 'Privacy progress (%)', color)
+                       experiment_target_anonscore, 'Privacy progress (%)', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['anon_gain'], f'Change in anonscore weighted (as={experiment_label})', len(all_stats['anon_gain']),
-                       experiment_target_anonscore, 'Anonscore gain', color)
+                       experiment_target_anonscore, 'Anonscore gain', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['anon_gain_ratio'], f'Change in anonscore weighted ratio out/in (as={experiment_label})', len(all_stats['anon_gain']),
-                       experiment_target_anonscore, 'Anonscore gain (weighted, ratio)', color)
+                       experiment_target_anonscore, 'Anonscore gain (weighted, ratio)', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['observed_remix_liquidity_ratio_cumul'], f'Cumullative remix liquidity ratio (as={experiment_label})', len(all_stats['observed_remix_liquidity_ratio_cumul']),
-                       experiment_target_anonscore, 'Cummulative remix ratio', color)
+                       experiment_target_anonscore, 'Cummulative remix ratio', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['num_inputs'],
                        f'Number of inputs', len(all_stats['num_inputs']),
-                       experiment_target_anonscore, 'number of inputs', color)
+                       experiment_target_anonscore, 'number of inputs', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['num_outputs'],
                        f'Number of outputs', len(all_stats['num_outputs']),
-                       experiment_target_anonscore, 'number of outputs', color)
+                       experiment_target_anonscore, 'number of outputs', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['num_wallet_coins'], f'Number of wallet coins', len(all_stats['num_wallet_coins']),
-                       f'{experiment_target_anonscore}', '# coins', color)
+                       f'{experiment_target_anonscore}', '# coins', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['observed_mix_liquidity'],
                        f'Mixed liquidity per coinjoin', len(all_stats['observed_mix_liquidity']),
-                       experiment_target_anonscore, 'sum of mixed inputs', color)
+                       experiment_target_anonscore, 'sum of mixed inputs', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['skipped_cjtxs'],
                        f'Skipped cjtxs', len(all_stats['skipped_cjtxs']),
-                       experiment_target_anonscore, 'num cjtxs skipped', color)
+                       experiment_target_anonscore, 'num cjtxs skipped', color, avg_color)
     index += 1
     ax = mfig.get(index)
     plot_cj_anonscores_ax(ax, all_stats['anon_gain_weighted'], f'Privacy gain sum weighted', len(all_stats['anon_gain_weighted']),
-                       experiment_target_anonscore, 'Privacy gain', color)
+                       experiment_target_anonscore, 'Privacy gain', color, avg_color)
 
 
 def create_download_script(wallets_names: list, target_path: str, file_name: str):
@@ -1644,9 +1643,9 @@ def main(argv=None):
 
         # Plot both experiments into single image
     #    plot_ww2mix_stats(mfig, all25_stats, '25&38', '25', 'royalblue')
-        plot_ww2mix_stats(mfig, all25_1m_stats, '25&38', '25', 'royalblue')
-        plot_ww2mix_stats(mfig, all38_stats, '25&38', '38', 'lightcoral')
-        plot_ww2mix_stats(mfig, all25_2m_stats, '25&38', '25', 'darkblue')
+        plot_ww2mix_stats(mfig, all25_1m_stats, '25&38', '25', 'royalblue', 'royalblue')
+        plot_ww2mix_stats(mfig, all38_stats, '25&38', '38', 'lightcoral', 'lightcoral')
+        plot_ww2mix_stats(mfig, all25_2m_stats, '25&38', '25', 'darkblue', 'darkblue')
 
         # save graph
         mfig.plt.suptitle(f'Combined plots as25 and as38', fontsize=16)  # Adjust the fontsize and y position as needed
