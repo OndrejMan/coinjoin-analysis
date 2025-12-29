@@ -23,7 +23,7 @@ from cj_process.cj_analysis import get_output_name_string, get_input_name_string
 from cj_process import cj_analysis as als
 from cj_process import cj_consts as cjc
 from cj_process import cj_assesment as cja
-import cj_process.cj_visualize as cjvis
+from cj_process import cj_visualize as cjvis
 import argparse
 import gc
 import time
@@ -1563,7 +1563,7 @@ def wasabi_detect_false(target_path: str | Path, tx_file: str):
 
     print(f'Going to process the following subfolders of {target_path}: {files}')
     # Load false positives
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_path)
     SM.print(f'Number of false positives initially (false_cjtxs.json): {len(set(false_cjtxs))}')
 
     # Detected false positives candidates. 3m_xxx contains subset of txs from last 3 months.
@@ -2391,7 +2391,7 @@ def analyze_zksnacks_output_clusters(mix_id, target_path):
 def visualize_interval(mix_id: str, target_save_path: str, last_stop_date_str: str, current_stop_date_str: str):
     logging.info(f'Processing interval {last_stop_date_str} - {current_stop_date_str}')
 
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_save_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_save_path)
 
     interval_path = os.path.join(target_save_path, f'{last_stop_date_str.replace(":", "-")}--{current_stop_date_str.replace(":", "-")}_unknown-static-100-1utxo')
     assert os.path.exists(interval_path), f'{interval_path} does not exist'
@@ -2410,7 +2410,7 @@ def visualize_intervals(mix_id: str, target_path: os.path, start_date: str, stop
     if not os.path.exists(target_save_path):
         os.makedirs(target_save_path.replace('\\', '/'))
 
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_save_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_save_path)
 
     # Visualize all data
     interval_data = als.load_coinjoins_from_file(target_save_path, false_cjtxs, True)
@@ -2513,7 +2513,8 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
     else:
         coords = []
         if mix_protocol == CoinjoinType.WW2:
-            coords = [('wasabi2', coord_name) for coord_name in cjc.WASABI2_COORD_NAMES_ALL]
+            mix_ids = cjc.WASABI2_COORD_NAMES_ALL if op.MIX_IDS == "" else op.MIX_IDS
+            coords = [('wasabi2', coord_name) for coord_name in mix_ids]
             coords.append(('wasabi2', ''))  # Add record or all coordinators together
         if mix_protocol == CoinjoinType.WW1:
             coords = [('wasabi1', 'zksnacks'), ('wasabi1', 'others')]
@@ -2579,6 +2580,7 @@ class DumplingsParseOptions:
 
     ANALYSIS_PROCESS_ALL_COINJOINS_INTERVALS = False
     DETECT_FALSE_POSITIVES = False
+    EXTRACT_TEMPORARY_FALSE_POSITIVES = False
     RESTORE_FALSE_POSITIVES_FOR_OTHERS = False
     PLOT_REMIXES = False
     PLOT_REMIXES_SINGLE_INTERVAL = False
@@ -2683,6 +2685,7 @@ class DumplingsParseOptions:
         self.SAVE_BASE_FILES_JSON = True
         self.ANALYSIS_PROCESS_ALL_COINJOINS_INTERVALS = False
         self.DETECT_FALSE_POSITIVES = False
+        self.EXTRACT_TEMPORARY_FALSE_POSITIVES = False
         self.RESTORE_FALSE_POSITIVES_FOR_OTHERS = False
         self.PLOT_REMIXES = False
         self.PLOT_REMIXES_SINGLE_INTERVAL = False   # If True, separate standalone graph is generated for each interval
@@ -3000,9 +3003,9 @@ def restore_false_positives_for_others(target_path: str):
 #     return data
 
 
-def append_to_file(message: str, log_file: str | Path):
+def write_to_file(message: str, log_file: str | Path, mode: str):
     print(message, end="")
-    with open(log_file, "a", encoding="utf-8") as f:
+    with open(log_file, mode, encoding="utf-8") as f:
         f.write(message)
 
 
@@ -3032,7 +3035,11 @@ def main(argv=None):
     log_file = os.path.join(Path(op.target_base_path).parent, "summary.log")
     cmd_str = subprocess.list2cmdline(sys.argv)
     message = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {cmd_str}\n"
-    append_to_file(message, log_file)
+    write_to_file(message, log_file, 'a')
+
+    operation_file = os.path.join(Path(op.target_base_path).parent, "operation.txt")
+    write_to_file(cmd_str, operation_file, 'w')
+
     script_start_time = time.time()
 
     # WARNING: SW 100k pool does not match exactly mix_stay and active liqudity at the end - likely reason are neglected mining fees
@@ -3112,7 +3119,7 @@ def main(argv=None):
         # Load all ww2 coinjoins
         # Load all coords cjtxs
         # Compute difference and print len and txs
-        cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), True, None)
+        cjtxs = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), None, True)
         crawl_coord_txs = als.load_coordinator_mapping_from_file(os.path.join(target_path, 'wasabi2', 'txid_coord.json'), 'crawl')
 
         missing_crawl = {txid: None for txid in cjtxs['coinjoins'] if cjtxs['coinjoins'][txid]['broadcast_time'] > '2024-06-01'
@@ -3308,6 +3315,7 @@ def main(argv=None):
             # Split zkSNACKs (-> wasabi2_zksnacks) and post-zkSNACKs (-> wasabi2_others) pools
             # This splitting will allow to analyze separate pools, but also to make data files smaller and easier to process later
             logging.info('Going to wasabi2_extract_pools() *****************************')
+            write_to_file(f'{cmd_str} wasabi2_extract_pools', operation_file, 'w')
             split_pool_info = wasabi2_extract_pools_destroys_data(data, target_path, op.interval_start_date, op.interval_stop_date)
             logging.info('done wasabi2_extract_pools() *****************************')
             free_memory(data)
@@ -3317,10 +3325,12 @@ def main(argv=None):
 
             # WW2 needs additional treatment - detect and fix origin of WW1 inflows as friends
             # Do first separated pools, then the original (large) unseparated one
+            write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1', operation_file, 'w')
             for pool_name in mix_ids:
                 fix_ww2_for_fdnp_ww1(pool_name, target_path)
 
             for pool_name in mix_ids:
+                write_to_file(f'{cmd_str} process_and_save_intervals_filter({pool_name}', operation_file, 'w')
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 pool_interval_start_date = split_pool_info[pool_name]['start_date']
                 if op.interval_start_date != "" and pool_interval_start_date < op.interval_start_date:
@@ -3337,16 +3347,19 @@ def main(argv=None):
 
             # Fix the large aggregate file (may crash due to huge memory requirements)
             # Precaution: Let's streamline large dictionary first and save
+            write_to_file(f'{cmd_str} streamline_coinjoins_structure({pool_name}', operation_file, 'w')
             ww2_data = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), None, False)
             als.streamline_coinjoins_structure(ww2_data)
             als.save_json_to_file(os.path.join(target_path, 'wasabi2', 'coinjoin_tx_info.json'), ww2_data)
             del ww2_data
 
             logging.info(f'Going to fix_ww2_for_fdnp_ww1(wasabi2) *****************************')
+            write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1(wasabi2)', operation_file, 'w')
             fix_ww2_for_fdnp_ww1('wasabi2', target_path)
             logging.info(f'done fix_ww2_for_fdnp_ww1(wasabi2) *****************************')
             logging.info(f'Going to process_and_save_intervals_filter(wasabi2) *****************************')
             interval_start_date = '2022-06-01 00:00:07.000' if op.interval_start_date == "" else op.interval_start_date
+            write_to_file(f'{cmd_str} process_and_save_intervals_filter(wasabi2)', operation_file, 'w')
             process_and_save_intervals_filter('wasabi2', MIX_PROTOCOL.WASABI2, target_path, interval_start_date, op.interval_stop_date,
                                        'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None, op.SAVE_BASE_FILES_JSON, True)
             logging.info(f'done process_and_save_intervals_filter(wasabi2) *****************************')
@@ -3403,6 +3416,7 @@ def main(argv=None):
                 if os.path.exists(target_base_path):
                     # Run false detection
                     data = wasabi_detect_false(target_base_path, 'coinjoin_tx_info.json')
+
                     # If available, add extended information about coordinator etc.
                     no_remix_all_ext = als.load_json_from_file(os.path.join(target_base_path, 'no_remix_txs.json'))
                     tx_2_coord_map_path = os.path.join(target_path, 'wasabi2_others', 'txid_to_coord_discovered_renamed.json')
@@ -3433,6 +3447,32 @@ def main(argv=None):
                 else:
                     logging.warning(f'DETECT_FALSE_POSITIVES: path {target_base_path} does not exist')
 
+    if op.EXTRACT_TEMPORARY_FALSE_POSITIVES:
+        # Extract temporary false positives into specific file 'false_cjtxs.json.temp' for potential usage in
+        # Expects 'no_remix_txs.json' file to be already created, run DETECT_FALSE_POSITIVES before this operation
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            FP_HITS_TO_TEMPORARY = ['recent__stdenom_rbf_notap_onechange', 'recent__both_reuse']
+            mix_ids = ['wasabi2'] if op.MIX_IDS == "" else op.MIX_IDS
+            for mix_id in mix_ids:
+                target_base_path = os.path.join(target_path, mix_id)
+                target_fp_file = os.path.join(target_base_path, f'no_remix_txs.json')
+                if os.path.exists(target_fp_file):
+                    logging.info(f'Going to process : {target_fp_file}')
+                    candidate_fp = als.load_json_from_file(target_fp_file)
+                    # Filter sections only to ones specified by FP_HITS_TO_TEMPORARY
+                    for section in list(candidate_fp.keys()):
+                        if section not in FP_HITS_TO_TEMPORARY:
+                            candidate_fp.pop(section)
+                    # Transform into format used by false_cjtxs.json
+                    fp_txs_temp = {section: list(candidate_fp[section].keys()) for section in candidate_fp.keys()}
+                    target_fp_file_temp = os.path.join(target_base_path, f'false_cjtxs.json.brief')
+                    als.save_json_to_file_pretty(target_fp_file_temp, fp_txs_temp)
+                    total_candidate_txs = sum([len(fp_txs_temp[section]) for section in fp_txs_temp.keys()])
+                    SM.print(f'Total {total_candidate_txs} txs saved into {target_fp_file_temp} using {FP_HITS_TO_TEMPORARY} mask')
+                else:
+                    SM.print(f'{target_fp_file} is missing, no action')
+
+
     if op.RESTORE_FALSE_POSITIVES_FOR_OTHERS:
         restore_false_positives_for_others(target_path)
 
@@ -3451,12 +3491,30 @@ def main(argv=None):
 
             coord_tx_mapping = als.load_json_from_file(os.path.join(target_path, 'wasabi2_others', 'txid_coord_discovered_renamed.json'))
             selected_coords_default = ["kruw", "mega", "btip", "gingerwallet", "wasabicoordinator", "coinjoin_nl",
-                               "opencoordinator", "dragonordnance", "wasabist", "strange_2025", "unknown_2024_e85631", "unknown_2024_28ce7b"]
+                                       "opencoordinator", "dragonordnance", "wasabist", "strange_2025",
+                                       "unknown_2024_e85631", "unknown_2024_28ce7b"]
+
+            EXTRACT_stdenom_rbf_notap_onechange_MIX = True
+            if EXTRACT_stdenom_rbf_notap_onechange_MIX:
+                # Add special ww2 transactions "stdenom_rbf_notap_onechange" (likely false positives) into extracted pools for investigation
+                false_cjtx = als.load_json_from_file(os.path.join(target_path, 'wasabi2', 'false_cjtxs.json'))
+                if "stdenom_rbf_notap_onechange" in false_cjtx.keys():
+                    coord_tx_mapping["unknown_stdenom_rbf_notap_onechange"] = false_cjtx["stdenom_rbf_notap_onechange"]
+                    selected_coords_default.append('unknown_stdenom_rbf_notap_onechange')
+                not_found = 0
+                for txid in coord_tx_mapping["unknown_stdenom_rbf_notap_onechange"]:
+                    if txid not in data['coinjoins'].keys():
+                        print(f'{txid} not in coinjoins')
+                        not_found += 1
+                print(f'Total NOT found unknown_stdenom_rbf_notap_onechange: {not_found} from {len(coord_tx_mapping["unknown_stdenom_rbf_notap_onechange"])}')
+
             # Force MIX_IDS subset if required
             selected_coords = selected_coords_default if op.MIX_IDS == "" else op.MIX_IDS
-
+            write_to_file(f'{cmd_str} wasabi2_extract_other_pools', operation_file, 'w')
             split_pool_info = wasabi2_extract_other_pools(selected_coords, data, target_path, op.interval_stop_date, coord_tx_mapping)
+
             # Perform splitting into month intervals for all processed coordinators
+            write_to_file(f'{cmd_str} split_pools', operation_file, 'w')
             for pool_name in split_pool_info.keys():
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 pool_data = process_and_save_intervals_filter(pool_name, MIX_PROTOCOL.WASABI2, target_path,
@@ -3465,6 +3523,14 @@ def main(argv=None):
                                                               'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None,
                                                               op.SAVE_BASE_FILES_JSON, True)
                 logging.info(f'done for {pool_name}) *****************************')
+
+            if EXTRACT_stdenom_rbf_notap_onechange_MIX:
+                # Create special false_cjtxs.json in wasabi2_unknown_stdenom_rbf_notap_onechange folder without stdenom_rbf_notap_onechange
+                false_cjtx = als.load_json_from_file(os.path.join(target_path, 'wasabi2', 'false_cjtxs.json'))
+                if "stdenom_rbf_notap_onechange" in false_cjtx.keys():
+                    false_cjtx.pop("stdenom_rbf_notap_onechange")
+                als.save_json_to_file_pretty(os.path.join(target_path, 'wasabi2_unknown_stdenom_rbf_notap_onechange', 'false_cjtxs.json'), false_cjtx)
+
 
         if op.CJ_TYPE == CoinjoinType.WW1:
             data = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi1'), None, False)
@@ -3657,7 +3723,7 @@ def main(argv=None):
 
     if op.ANALYSIS_WALLET_PREDICTION_EXT:
         if op.CJ_TYPE == CoinjoinType.WW2:
-            #cja.analyze_impact_session_tx_removed_predictions(op, target_path)
+            cja.analyze_impact_session_tx_removed_predictions(op, target_path)
             cja.analyze_impact_session_tx_removed_predictions2(op, target_path)
 
 
@@ -3719,26 +3785,30 @@ def main(argv=None):
     if op.ANALYZE_DETECT_COORDINATORS_ALG_DETAILED:
         if op.CJ_TYPE == CoinjoinType.WW2:
             # Drop fraction of trailing transactions from ground truth attribution
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.TAIL),
-            #     'coord_discovery_analysis___drop__tail')
             cja.wasabi_detect_coordinators_evaluation_parallel(
                 os.path.join(target_path, 'wasabi2_others'),
                 cja._eval_drop_attributions_single_coord,
-                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
-                'coord_discovery_analysis___drop__front')
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.TAIL),
+                'coord_discovery_analysis___drop__tail')
+
+            cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__tail', 'tail, single coordinator', omitt_coords, True, False)
+
+            # cja.wasabi_detect_coordinators_evaluation_parallel(
+            #     os.path.join(target_path, 'wasabi2_others'),
+            #     cja._eval_drop_attributions_single_coord,
+            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), [1], cja.DROP_TYPE.FRONT),
+            #     'coord_discovery_analysis___drop__front')
 
             # Drop random transactions from ground truth attribution of any coordinator
             # Note: As we are dropping from any coordinator, then every coordinator tested in parallel
             #       is one independent try => if we repeat 10x => we made 10x len(coords) evaluations
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(1, 101, 1)), list(range(0, 1)),
-            #                                      cja.DROP_TYPE.RANDOM_ANY),
-            #     'coord_discovery_analysis___drop__randomany')
+            cja.wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'),
+                cja._eval_drop_attributions_single_coord,
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(1, 101, 1)), list(range(0, 1)),
+                                                 cja.DROP_TYPE.RANDOM_ANY),
+                'coord_discovery_analysis___drop__randomany')
+            cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomany', 'random, any coordinator', omitt_coords, True, True)
 
             # cja.wasabi_detect_coordinators_evaluation_parallel(
             #     os.path.join(target_path, 'wasabi2_others'),
@@ -3746,11 +3816,12 @@ def main(argv=None):
             #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 2)), cja.DROP_TYPE.RANDOM_ANY),
             #     'coord_discovery_analysis___drop__randomany')
 
-            # cja.wasabi_detect_coordinators_evaluation_parallel(
-            #     os.path.join(target_path, 'wasabi2_others'),
-            #     cja._eval_drop_attributions_single_coord,
-            #     cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 10)), cja.DROP_TYPE.RANDOM_SINGLE),
-            #     'coord_discovery_analysis___drop__randomsingle')
+            cja.wasabi_detect_coordinators_evaluation_parallel(
+                os.path.join(target_path, 'wasabi2_others'),
+                cja._eval_drop_attributions_single_coord,
+                cja.COORD_DISCOVERY_ANALYSIS_CFG([0.4], list(range(0, 101, 1)), list(range(0, 10)), cja.DROP_TYPE.RANDOM_SINGLE),
+                'coord_discovery_analysis___drop__randomsingle')
+            cjvis.plot_coord_attribution_stats_aggregated(target_path, 'all_coord_discovery_analysis___drop__randomsingle', 'random, single coordinator', omitt_coords, True, False)
 
             # Analyze impact of threshold for intermix attributions
             # cja.wasabi_detect_coordinators_evaluation_parallel(
@@ -3805,7 +3876,7 @@ def main(argv=None):
 
     elapsed = time.time() - script_start_time
     end_msg = f"  SUCCESS (elapsed: {elapsed:.2f} seconds)\n"
-    append_to_file(end_msg, log_file)
+    write_to_file(end_msg, log_file, 'a')
 
     return 0
 

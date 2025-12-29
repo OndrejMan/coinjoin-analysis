@@ -187,6 +187,73 @@ def check_coinjoin_files(base_path):
     return mix_results_all
 
 
+def check_script_results(base_path: str):
+    """
+    Checks content of 'summary.log' for result of last aggregated run. If any command failed,
+    `summary_processing.success` is not created. File 'summary_processing_info.txt' with results is created.
+    :param base_path:
+    :return:
+    """
+    DELIM = "###############################################"
+    summary_file = os.path.join(base_path, os.pardir, os.pardir, 'summary.log')
+    success_file = os.path.join(base_path, 'summary_processing.success')
+    summary_info_file = os.path.join(base_path, 'summary_processing_info.txt')
+
+    print(f'Processing execution results from {summary_file}')
+
+    # Remove success file (is re-created later if success)
+    if os.path.exists(success_file):
+        os.remove(success_file)
+
+    # Analyze last log segment
+    with open(summary_file, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+
+    delim_idxs = [i for i, line in enumerate(lines) if line.rstrip("\n") == DELIM]
+
+    # Need at least two delimiters to have a segment between them
+    if len(delim_idxs) < 2:
+        # Still produce info file (empty) as a deterministic output
+        with open(summary_info_file, "w", encoding="utf-8") as out:
+            out.write("")
+        # And ensure success file is not created
+        if os.path.exists(success_file):
+            os.remove(success_file)
+        print('Not enough DELIMs found')
+        return False
+
+    start = delim_idxs[-2]
+    end = delim_idxs[-1] + 1
+    segment = lines[start:end]
+
+    # Store last segment (exactly as in file)
+    with open(summary_info_file, "w", encoding="utf-8") as out:
+        out.write(DELIM)
+        out.writelines(segment)
+
+    # Check rule: every command line is followed immediately by SUCCESS line
+    ok = True
+    for i, line in enumerate(segment):
+        s = line.strip()
+        if s.startswith("["):
+            if i + 1 >= len(segment) or not segment[i + 1].strip().startswith("SUCCESS"):
+                ok = False
+                break
+
+    # Create or remove success marker accordingly
+    if ok:
+        with open(success_file, "w", encoding="utf-8") as f:
+            f.write("")
+        print(f'  All operations SUCCESS')
+    else:
+        if os.path.exists(success_file):
+            os.remove(success_file)
+        print(f'  Some operations failed (see {summary_info_file})')
+
+    return ok
+
+
 if __name__ == "__main__":
+    check_script_results(sys.argv[1])
     check_coinjoin_files(sys.argv[1])
 

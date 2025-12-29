@@ -561,7 +561,7 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
     mining_fee_rates = als.load_json_from_file(os.path.join(target_path, 'fee_rates.json'))
 
     # Load false positives
-    false_cjtxs = als.load_false_cjtxs_from_file(os.path.join(target_path, 'false_cjtxs.json'))
+    false_cjtxs = als.load_false_cjtxs(target_path)
 
     # Compute number of required month subgraphs
     num_months = sum([1 for dir_name in files
@@ -1075,7 +1075,7 @@ def estimate_wallet_prediction_factor(all_data: dict, base_path, mix_id, predict
     predicted_wallets_outputs_cihi_avg = als.smooth_interval(predicted_wallets_list_outputs_cihi, LARGE_AVG_WINDOW) if predicted_wallets_list_outputs_cihi else None
 
     if ax_provided == None:
-        fig_single, ax = plt.subplots(figsize=(16, 4))  # Figure for single plot
+        fig_single, ax = plt.subplots(figsize=(12, 4))  # Figure for single plot
     else:
         ax = ax_provided
     # Plot explict time ticks instead of default ones

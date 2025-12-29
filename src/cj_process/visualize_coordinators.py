@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 from collections import defaultdict
 from itertools import groupby
 
@@ -12,10 +13,16 @@ import cj_process.cj_analysis as als
 SATS_IN_BTC = 100000000
 
 
-def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transaction_outputs: dict, counts: bool, start_date: str = None):
+def build_plot_intercoord_flows_sankey(base_path: str, entity_dict: dict, transaction_outputs: dict, counts: bool, start_date: str = None):
+    build_intercoord_flows_sankey(base_path, entity_dict, transaction_outputs, counts, start_date)
+    plot_intercoord_flows_sankey(base_path, counts, start_date)
+
+
+def build_intercoord_flows_sankey(base_path: str, entity_dict: dict, transaction_outputs: dict, counts: bool, start_date: str = None):
     output_file_template = f"coordinator_flows_{'counts' if counts else 'values'}_{start_date[0:10] if start_date else ''}"
     entity_names = list(entity_dict.keys())
-    entity_index = {name: i for i, name in enumerate(entity_names)}
+    entity_index = {name: i for i, name in enumerate(sorted(entity_names))}
+    print(f'build_intercoord_flows_sankey: {entity_index}')
 
     # Precompute transaction-to-entity mapping for faster lookup
     tx_to_entity = {tx_id: entity for entity, tx_ids in entity_dict.items() for tx_id in tx_ids}
@@ -53,6 +60,32 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
                                     flows_only_inter[key] = flows_only_inter.get(key, 0) + output_data.get("value", 0)
         print('... done')
 
+    # Turn from tuples to dict for saving
+    flows_to_save = {}
+    for (k1, k2), v in flows_only_inter.items():
+        flows_to_save.setdefault(k1, {})[k2] = v
+    save_path = os.path.join(base_path, f"{output_file_template}.json")
+    als.save_json_to_file_pretty(save_path, flows_to_save, True)
+    print(f"Flows saved to {save_path}")
+
+
+def plot_intercoord_flows_sankey(base_path: str, counts: bool, start_date: str = None):
+    output_file_template = f"coordinator_flows_{'counts' if counts else 'values'}_{start_date[0:10] if start_date else ''}"
+
+    # Load from file, turn back from dict to tuples (this )
+    flows_loaded = als.load_json_from_file(os.path.join(base_path, f"{output_file_template}.json"))
+    # Compute required entity structures
+    all_names = set(flows_loaded.keys())
+    all_names.update([name for x in flows_loaded.keys() for name in sorted(flows_loaded[x].keys())])
+    entity_names = list(all_names)
+    entity_index = {name: i for i, name in enumerate(entity_names)}
+    print(entity_index)
+    print(f'plot_intercoord_flows_sankey: {entity_index}')
+
+    flows_only_inter = {(k1, k2): v for k1, inner in flows_loaded.items() for k2, v in inner.items()}
+
+
+    # Pre-process flows before display
     if not counts:
         flows_only_inter_btc = {key: round(flows_only_inter[key] / SATS_IN_BTC, 1) for key in flows_only_inter.keys()}
         flows = flows_only_inter_btc
@@ -60,8 +93,8 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
         #flows = flows_all
         flows = flows_only_inter
 
-    print(f"Inter-coordinators flows ({'counts' if counts else 'values'}): {flows}")
-    #als.save_json_to_file_pretty(f'{output_file_template}.json', flows)
+    type_str = 'counts' if counts else 'values'
+    print(f"Inter-coordinators flows ({type_str}): {flows}")
 
     sources, targets, values = zip(
         *[(entity_index[src], entity_index[tgt], val) for (src, tgt), val in flows.items()]) if flows else ([], [], [])
@@ -90,13 +123,14 @@ def build_intercoord_flows_sankey_good(base_path: str, entity_dict: dict, transa
         )
     ))
     fig.update_layout(
-        font=dict(size=18)  # This affects all text in the Sankey diagram
+        #font=dict(size=18)  # This affects all text in the Sankey diagram
+        font = dict(size=28)  # This affects all text in the Sankey diagram
     )
     fig.update_layout(title_text=f"Inter-coordinators flows for Wasabi 2.x ({'output counts' if counts else 'output values'})"
-                                 f" [{'all coinjoins' if start_date is None else 'coinjoins after ' + start_date}]", font_size=10)
+                                 f" [{'all coinjoins' if start_date is None else 'coinjoins after ' + start_date}]", font_size=18)
     print(f"Sankey diagram updated")
     #fig.show()  # BUGBUG: this call hangs # This ensures the renderer is initialized before saving
-    fig.write_html(f'{output_file_template}.html', auto_open=True)
+    fig.write_html(f"{os.path.join(base_path, f'{output_file_template}.html')}", auto_open=False)
     print(f"Sankey diagram shown")
     # fig.to_html(os.path.join(base_path, f'{output_file_template}.html'))
     # print(f"Sankey diagram to html saved")
@@ -114,7 +148,7 @@ def visualize_coord_flows(base_path: str):
     with open(load_path, "r") as file:
         data = orjson.loads(file.read())
 
-    ADD_ZKSNACKS = False
+    ADD_ZKSNACKS = True
     if ADD_ZKSNACKS:
         load_path = os.path.join(base_path, 'Scanner', "wasabi2_zksnacks", 'coinjoin_tx_info.json')
         with open(load_path, "r") as file:
@@ -145,12 +179,12 @@ def visualize_coord_flows(base_path: str):
     # Filter only coordinators with known name (only digits are discarded)
     entities_to_process = {entity: entities[entity] for entity in entities.keys() if not entity.isdigit()}
 
-    build_intercoord_flows_sankey_good(base_path, entities_to_process, data, True)
-    build_intercoord_flows_sankey_good(base_path, entities_to_process, data, False)
-    build_intercoord_flows_sankey_good(base_path, entities_to_process, data, True, "2024-09-01 00:00:00.000")
-    build_intercoord_flows_sankey_good(base_path, entities_to_process, data, False, "2024-09-01 00:00:00.000")
-    build_intercoord_flows_sankey_good(base_path, entities_to_process, data, True, "2025-01-01 00:00:00.000")
-    build_intercoord_flows_sankey_good(base_path, entities_to_process, data, False, "2025-01-01 00:00:00.000")
+    build_plot_intercoord_flows_sankey(base_path, entities_to_process, data, True)
+    build_plot_intercoord_flows_sankey(base_path, entities_to_process, data, False)
+    build_plot_intercoord_flows_sankey(base_path, entities_to_process, data, True, "2024-09-01 00:00:00.000")
+    build_plot_intercoord_flows_sankey(base_path, entities_to_process, data, False, "2024-09-01 00:00:00.000")
+    build_plot_intercoord_flows_sankey(base_path, entities_to_process, data, True, "2025-01-01 00:00:00.000")
+    build_plot_intercoord_flows_sankey(base_path, entities_to_process, data, False, "2025-01-01 00:00:00.000")
 
 
 def gant_coordinators_plotly(base_path: str):
@@ -378,11 +412,15 @@ def compute_reorder_stats(base_path: str):
 
 
 if __name__ == "__main__":
-    base_path = 'c:/!blockchains/CoinJoin/Dumplings_Stats_20250820/'
-    base_path = '/home/xsvenda/btc/dumplings_temp2/Scanner/'
+    if len(sys.argv) > 1:
+        base_path = sys.argv[1]
+    else:
+        print('No target path provided')
+        exit(1)
 
+    print(f'Processing path {base_path}')
     #compute_reorder_stats(base_path)
-    gant_coordinators_plotly(base_path)
-    #visualize_coord_flows(base_path)
+    #gant_coordinators_plotly(base_path)
+    visualize_coord_flows(base_path)
 
 

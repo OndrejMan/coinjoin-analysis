@@ -5,7 +5,7 @@ BASE_PATH=$HOME
 source $BASE_PATH/btc/coinjoin-analysis/scripts/activate_env.sh
 
 # Run generation of aggregated plots for all coordinators
-python3 -m cj_process.parse_dumplings --cjtype ww2 --action plot_coinjoins --env_vars "PLOT_REMIXES_MULTIGRAPH=False" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+python3 -m cj_process.parse_dumplings --cjtype ww2 --action plot_coinjoins --env_vars "PLOT_REMIXES_AGGREGATE=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log
 
 # Run generation of plots for single intervals 
 python3 -m cj_process.parse_dumplings --cjtype ww2 --action plot_coinjoins --env_vars "PLOT_REMIXES_SINGLE_INTERVAL=True" --target-path $TMP_DIR/ | tee parse_dumplings.py.log

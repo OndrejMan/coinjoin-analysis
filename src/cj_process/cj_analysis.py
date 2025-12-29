@@ -1187,6 +1187,30 @@ def compute_link_between_inputs_and_outputs(coinjoins, sorted_cjs_in_scope):
                 coinjoins[target_output[0]]['outputs'][target_output[1]]['spend_by_txid'] = (txid, index)
                 coinjoins[txid]['inputs'][index]['spending_tx'] = (target_output[0], target_output[1])
 
+    #
+    # Update 'anon_score' item for inputs from previous outputs where exist
+    #
+    # Start with outputs - if spent, then fill anon_score
+    for cjtx in coinjoins.keys():
+        record = coinjoins[cjtx]
+        for index in record['outputs'].keys():
+            if 'spend_by_txid' in record['outputs'][index].keys():
+                txid, tx_index = record['outputs'][index]['spend_by_txid']
+                #tx_index = str(tx_index)
+                if txid in coinjoins.keys():
+                    if (txid in coinjoins.keys() and
+                            'anon_score' in coinjoins[txid]['inputs'][tx_index].keys()):
+                        assert math.isclose(coinjoins[txid]['inputs'][tx_index]['anon_score'], record['outputs'][index]['anon_score'], rel_tol=1e-9)
+                    else:
+                        coinjoins[txid]['inputs'][tx_index]['anon_score'] = record['outputs'][index]['anon_score']
+    # Fill all non-set inputs to anonscore 1.0
+    for cjtx in coinjoins.keys():
+        record = coinjoins[cjtx]
+        for index in record['inputs'].keys():
+            if 'anon_score' not in record['inputs'][index].keys():
+                record['inputs'][index]['anon_score'] = 1.0
+
+
     return coinjoins
 
 
@@ -1266,7 +1290,32 @@ def load_coinjoins_from_file_sqlite(target_load_path: str, false_cjtxs: dict, fi
     return data
 
 
+def load_false_cjtxs(base_path: Path):
+    """
+    Loads false positives transactions from all files with 'false_cjtxs.json.*' format,
+    then merge together
+    :param base_path: path where to search for 'false_cjtxs.json.*' files
+    :return: list of false positives transactions
+    """
+    false_cjtxs = set()
+    # Add original file 'false_cjtxs.json'
+    fp_files = [os.path.join(base_path, 'false_cjtxs.json')]
+    # List all files with 'false_cjtxs.json.*' format and merge
+    fp_files.extend(list(Path(base_path).glob('false_cjtxs.json.*')))
+    for fp_file in fp_files:
+        logging.debug(f"Reading false positives from file {fp_file}")
+        false_cjtxs.update(load_false_cjtxs_from_file(fp_file))
+
+    return list(false_cjtxs)
+
+
 def load_false_cjtxs_from_file(fp_file):
+    """
+    Loads all false positive transactions from structured json (section->list of false cjtxs),
+    then merge it together.
+    :param fp_file: target file with false positives
+    :return:
+    """
     data = load_json_from_file(fp_file)
     false_cjtxs = [item for sublist in data.values() for item in sublist]
     if PERF_USE_SHORT_TXID:
@@ -1307,7 +1356,7 @@ def load_coinjoins_from_file(target_load_path: str | Path, false_cjtxs: dict | N
         if not filtered_false_coinjoins:
             filtered_false_coinjoins = {}
         if false_cjtxs is None:
-            false_cjtxs = load_false_cjtxs_from_file(os.path.join(target_load_path, 'false_cjtxs.json'))
+            false_cjtxs = load_false_cjtxs(target_load_path)
         for false_tx in false_cjtxs:
             if false_tx in data['coinjoins'].keys():
                 # Remove false transaction and place it into separate list (if provided)
@@ -1372,7 +1421,7 @@ def compute_partial_vsize(tx_hex: str, input_indices: list[int], output_indices:
     filtered_tx = CMutableTransaction(mutable_tx.vin, mutable_tx.vout, mutable_tx.nLockTime, mutable_tx.nVersion, CTxWitness(filtered_tx2_witness))
 
     # Difference between original and filtered transaction is the contribution by the specified inputs and outputs
-    filtered_weight = original_tx.calc_weight() - filtered_tx.calc_weight()
+    filtered_weight = original_tx.calc_weight() - filtered_tx.calc_weight() if len(filtered_tx.vin) > 0 else original_tx.calc_weight()
     filtered_vsize = math.ceil(filtered_weight / 4)
 
     return filtered_vsize, orig_vsize
