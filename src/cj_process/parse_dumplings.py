@@ -2510,6 +2510,7 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
             SM.print(f'{mix_id}')
             liq_sum = als.print_liquidity_summary(data["coinjoins"], mix_id)
             als.save_json_to_file_pretty(os.path.join(target_path, f'liquidity_summary_{mix_id}.json'), liq_sum)
+            free_memory(data)
     else:
         coords = []
         if mix_protocol == CoinjoinType.WW2:
@@ -2526,6 +2527,7 @@ def analyze_liquidity_summary(mix_protocol, target_path: str):
             SM.print(f'{mix_id}')
             liq_sum = als.print_liquidity_summary(cjtx_coord["coinjoins"], f'{mix_id}')
             als.save_json_to_file_pretty(os.path.join(target_path, f'liquidity_summary_{mix_id}.json'), liq_sum)
+            free_memory(cjtx_coord)
 
 
 def parse_arguments(argv):
@@ -2610,6 +2612,8 @@ class DumplingsParseOptions:
     ANALYZE_DETECT_COORDINATORS_ALG = False
     ANALYZE_DETECT_COORDINATORS_ALG_DETAILED = False
     EXPORT_TX_FLAGS = False
+    FIX_WW2_FDNP = False
+    STREAMLINE_MIX_DATA = False
 
     target_base_path = ''
     #interval_stop_date = '2024-10-10 00:00:07.000'  # Last date to be analyzed, e.g., 2024-10-10 00:00:07.000
@@ -2713,6 +2717,8 @@ class DumplingsParseOptions:
         self.ANALYZE_DETECT_COORDINATORS_ALG = False
         self.ANALYZE_DETECT_COORDINATORS_ALG_DETAILED = False
         self.EXPORT_TX_FLAGS = False
+        self.FIX_WW2_FDNP = False
+        self.STREAMLINE_MIX_DATA = False
 
         self.PLOT_REMIXES_FLOWS = False
         self.PLOT_INTERMIX_FLOWS = False
@@ -3308,6 +3314,8 @@ def main(argv=None):
 
 
         if op.CJ_TYPE == CoinjoinType.WW2:
+            # IMPORTANT: this will NOT process complete 'wasabi2' interval due to excessive memory requirements
+            #  requires STREAMLINE_MIX_DATA + MIX_IDS=['wasabi2'] and FIX_WW2_FDNP + MIX_IDS=['wasabi2'] calls
             interval_start_date = '2022-06-01 00:00:07.000' if op.interval_start_date == "" else op.interval_start_date
             data = process_and_save_intervals_filter('wasabi2', MIX_PROTOCOL.WASABI2, target_path, interval_start_date, op.interval_stop_date,
                     'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None, op.SAVE_BASE_FILES_JSON, False)
@@ -3345,24 +3353,34 @@ def main(argv=None):
                 free_memory(pool_data)
                 logging.info(f'done for {pool_name}) *****************************')
 
-            # Fix the large aggregate file (may crash due to huge memory requirements)
-            # Precaution: Let's streamline large dictionary first and save
-            write_to_file(f'{cmd_str} streamline_coinjoins_structure({pool_name}', operation_file, 'w')
-            ww2_data = als.load_coinjoins_from_file(os.path.join(target_path, 'wasabi2'), None, False)
-            als.streamline_coinjoins_structure(ww2_data)
-            als.save_json_to_file(os.path.join(target_path, 'wasabi2', 'coinjoin_tx_info.json'), ww2_data)
-            del ww2_data
+    if op.STREAMLINE_MIX_DATA:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            for pool_name in op.MIX_IDS:
+                write_to_file(f'{cmd_str} streamline_coinjoins_structure({pool_name}', operation_file, 'w')
+                data = als.load_coinjoins_from_file(os.path.join(target_path, pool_name), None, False)
+                als.streamline_coinjoins_structure(data)
+                als.save_json_to_file(os.path.join(target_path, pool_name, 'coinjoin_tx_info.json'), data)
+                free_memory(data)
+        else:
+            logging.warning(f'No operation for STREAMLINE_MIX_DATA defined for {op.CJ_TYPE}')
 
-            logging.info(f'Going to fix_ww2_for_fdnp_ww1(wasabi2) *****************************')
-            write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1(wasabi2)', operation_file, 'w')
-            fix_ww2_for_fdnp_ww1('wasabi2', target_path)
-            logging.info(f'done fix_ww2_for_fdnp_ww1(wasabi2) *****************************')
-            logging.info(f'Going to process_and_save_intervals_filter(wasabi2) *****************************')
-            interval_start_date = '2022-06-01 00:00:07.000' if op.interval_start_date == "" else op.interval_start_date
-            write_to_file(f'{cmd_str} process_and_save_intervals_filter(wasabi2)', operation_file, 'w')
-            process_and_save_intervals_filter('wasabi2', MIX_PROTOCOL.WASABI2, target_path, interval_start_date, op.interval_stop_date,
-                                       'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None, op.SAVE_BASE_FILES_JSON, True)
-            logging.info(f'done process_and_save_intervals_filter(wasabi2) *****************************')
+    if op.FIX_WW2_FDNP:
+        if op.CJ_TYPE == CoinjoinType.WW2:
+            for pool_name in op.MIX_IDS:
+                logging.info(f'Going to fix_ww2_for_fdnp_ww1({pool_name}) *****************************')
+                write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1({pool_name})', operation_file, 'w')
+                fix_ww2_for_fdnp_ww1(pool_name, target_path)
+                logging.info(f'done fix_ww2_for_fdnp_ww1({pool_name}) *****************************')
+                logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
+                interval_start_date = '2022-06-01 00:00:07.000' if op.interval_start_date == "" else op.interval_start_date
+                write_to_file(f'{cmd_str} process_and_save_intervals_filter({pool_name})', operation_file, 'w')
+                process_and_save_intervals_filter(pool_name, MIX_PROTOCOL.WASABI2, target_path, interval_start_date,
+                                                  op.interval_stop_date,
+                                                  'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None,
+                                                  op.SAVE_BASE_FILES_JSON, True)
+                logging.info(f'done process_and_save_intervals_filter({pool_name}) *****************************')
+        else:
+            logging.warning(f'No operation for FIX_WW2_FDNP defined for {op.CJ_TYPE}')
 
     if op.VISUALIZE_ALL_COINJOINS_INTERVALS:
         if op.CJ_TYPE == CoinjoinType.SW:
@@ -3868,6 +3886,8 @@ def main(argv=None):
             with open(os.path.join(target_path, mix_id, 'coinjoin_tx_flags.csv'), "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerows(cjtxs_flags_csv)
+            free_memory(data)
+
 
 
     print('### SUMMARY #############################')
