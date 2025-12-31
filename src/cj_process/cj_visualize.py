@@ -649,7 +649,8 @@ def wasabi_plot_remixes_worker(mix_id: str, mix_protocol: MIX_PROTOCOL, target_p
                 new_month_indices.append(('year', next_month_index, dir_name[0:7]))
             next_month_index += len(data["coinjoins"])  # Store index of start fo next month (right after last index of current month)
             # TODO: if len(data["coinjoins"]) == 0, then month tick is plotted over previous one and is not visible
-            #    add some artificial space to improve visibility? Or add artificial empty coinjoin bar?
+            #    add some artificial space to improve visibility? Or add artificial empty coinjoin bar? Or use different
+            #    plotting style which will visibly plot also empty months?
 
             # Detect transactions with no remixes on input/out or both
             no_remix = als.detect_no_inout_remix_txs(data["coinjoins"])

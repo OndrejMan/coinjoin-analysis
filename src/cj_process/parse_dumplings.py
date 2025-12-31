@@ -2810,12 +2810,13 @@ def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target
                                  restrict_to_out_size = None, restrict_to_in_size = None,
                                  plot_multi_graphs: bool = False, plot_single_intervals: bool = False, plot_aggregate: bool = False):
     max_processes = multiprocessing.cpu_count()
-    if plot_single_intervals:
+    if plot_single_intervals:  # Single intervals can be processed in parallel
         #
         # Plot only single intervals, plotting done in parallel for speedup (works only on Linux, not Windows)
         # 1. Run first over all intervals without any plotting (=>fast), obtain results with starting values for intervals
         # 2. Run again in parallelized fashion with provided starting values for each interval (slower, but parallelized)
-        # Run without plotting
+
+        # 1. Run without plotting
         interval_info_file = os.path.join(target_path, 'interval_plot_stats.json')
         if not os.path.exists(interval_info_file):
             precomputed_results = cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
@@ -2834,7 +2835,7 @@ def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target
         only_dirs = [file for file in files if os.path.isdir(os.path.join(target_path, file))]
         files = only_dirs
 
-        # Now run plotting in parallel
+        # 2. Now run plotting in parallel
         results: List[dict] = []
         with ProcessPoolExecutor(max_workers=max_processes) as executor:
             futures = {
@@ -2861,12 +2862,14 @@ def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target
         return precomputed_results
     else:
         #
-        # Plot all graphs together (no parallelization)
+        # Plot all graphs together (no parallelization as whole (potentially large) coinjoin_tx_info.json needs to be loaded)
+        # TODO: Think of parallelization options
         #
-        return cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER, analyze_values, normalize_values,
-                                         restrict_to_out_size, restrict_to_in_size,
-                                         plot_multi_graphs, plot_single_intervals, plot_aggregate,
-                                         None, None)
+        return cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER,
+                                        analyze_values, normalize_values,
+                                        restrict_to_out_size, restrict_to_in_size,
+                                        plot_multi_graphs, plot_single_intervals, plot_aggregate,
+                                        None, None)
 
 
 def wasabi_plot_remixes_serial(mix_id: str, mix_protocol: MIX_PROTOCOL, target_path: Path, tx_file: str,
