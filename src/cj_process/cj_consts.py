@@ -32,3 +32,5 @@ WASABI1_COORD_NAMES_ALL = ["others", "zksnacks"]
 
 # Threshold from BIP-125: any input with nSequence < 0xFFFFFFFE signals RBF.
 RBF_THRESHOLD = 0xFFFFFFFE  # 4294967294
+
+SAFE_CPU_CORES = 24

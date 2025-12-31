@@ -1595,6 +1595,12 @@ def run_command(command, verbose):
 
 
 def streamline_coinjoins_structure(all_data:dict, compact_strong: bool=False):
+    """
+    Prune all_data dictionary of all (currently) unused data structures and shrinks unnecessarily long items like 32B txids.
+    :param all_data: Initial dictionary with full
+    :param compact_strong:
+    :return:
+    """
     full_txid_mapping = {'full_txid_map': {}}
 
     cjtxs_list = list(all_data['coinjoins'].keys())
