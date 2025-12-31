@@ -29,5 +29,5 @@ python3 -m cj_process.parse_dumplings --cjtype jm --action detect_false_positive
 python3 -m cj_process.parse_dumplings --cjtype jm --env_vars "EXPORT_TX_FLAGS=True" --target-path $TMP_DIR/
 
 # Analyse liquidity 
-python3 -m cj_process.parse_dumplings --cjtype jm --target-path $TMP_DIR/ --env_vars "ANALYSIS_LIQUIDITY=True" | tee parse_dumplings.py.log
+python3 -m cj_process.parse_dumplings --cjtype jm --env_vars "ANALYSIS_LIQUIDITY=True" --target-path $TMP_DIR/  | tee parse_dumplings.py.log
 
