@@ -10,6 +10,10 @@ source $BASE_PATH/btc/coinjoin-analysis/scripts/activate_env.sh
 
 # Extract and process Dumplings results
 python3 -m cj_process.parse_dumplings --cjtype ww2 --action process_dumplings --target-path $TMP_DIR/ | tee parse_dumplings.py.log
+# Perform fix for all wasabi2 intervals separately (to lowering memory requirements) 
+python3 -m cj_process.parse_dumplings --cjtype ww2 --env_vars "STREAMLINE_MIX_DATA=True;MIX_IDS=['wasabi2']" --target-path $TMP_DIR/ 
+python3 -m cj_process.parse_dumplings --cjtype ww2 --env_vars "FIX_WW2_FDNP=True;MIX_IDS=['wasabi2']" --target-path $TMP_DIR/ 
+
 
 # Download historical fee rates
 curl -sSL "https://mempool.space/api/v1/mining/blocks/fee-rates/all" > $TMP_DIR/Scanner/wasabi2/fee_rates.json
