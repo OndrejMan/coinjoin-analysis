@@ -49,7 +49,6 @@ CLUSTER_ID_CHECK_HARD_ASSERT = False
 
 op = None  # Global settings for the experiment
 
-
 # Configure the logging module
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger_to_disable = logging.getLogger("mathplotlib")
@@ -2620,6 +2619,8 @@ class DumplingsParseOptions:
     now = datetime.now()
     interval_stop_date = now.strftime('%Y-%m-%d %H:%M:%S.') + f'{int(now.microsecond / 1000):03d}'
     interval_start_date = ""
+    operation_file = ''  # Path to store current operation for perf analysis
+    cmd_str = ''  # Command line string
 
     def __init__(self):
         self.default_values()
@@ -2735,6 +2736,9 @@ class DumplingsParseOptions:
         for attr, value in vars(self).items():
             print(f'  {attr}={value}')
         print('*******************************************')
+
+    def set_current_op(self, operation: str, mode: str='w'):
+        write_to_file(f'{self.cmd_str} | {operation}', self.operation_file, mode)
 
 
 def free_memory(data_to_free):
@@ -2865,6 +2869,7 @@ def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target
         # Plot all graphs together (no parallelization as whole (potentially large) coinjoin_tx_info.json needs to be loaded)
         # TODO: Think of parallelization options
         #
+        op.set_current_op(f'serial plot({mix_id})/vals={analyze_values}/norm={normalize_values}')
         return cjvis.wasabi_plot_remixes_worker(mix_id, mix_protocol, target_path, tx_file, op.SORT_COINJOINS_BY_RELATIVE_ORDER,
                                         analyze_values, normalize_values,
                                         restrict_to_out_size, restrict_to_in_size,
@@ -3042,12 +3047,12 @@ def main(argv=None):
 
     # Perform logging operation start with complete cmd line
     log_file = os.path.join(Path(op.target_base_path).parent, "summary.log")
-    cmd_str = subprocess.list2cmdline(sys.argv)
-    message = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {cmd_str}\n"
+    op.cmd_str = subprocess.list2cmdline(sys.argv)
+    message = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {op.cmd_str}\n"
     write_to_file(message, log_file, 'a')
 
-    operation_file = os.path.join(Path(op.target_base_path).parent, "operation.txt")
-    write_to_file(cmd_str, operation_file, 'w')
+    op.operation_file = os.path.join(Path(op.target_base_path).parent, "operation.txt")
+    op.set_current_op('')
 
     script_start_time = time.time()
 
@@ -3326,7 +3331,7 @@ def main(argv=None):
             # Split zkSNACKs (-> wasabi2_zksnacks) and post-zkSNACKs (-> wasabi2_others) pools
             # This splitting will allow to analyze separate pools, but also to make data files smaller and easier to process later
             logging.info('Going to wasabi2_extract_pools() *****************************')
-            write_to_file(f'{cmd_str} wasabi2_extract_pools', operation_file, 'w')
+            op.set_current_op('wasabi2_extract_pools', 'w')
             split_pool_info = wasabi2_extract_pools_destroys_data(data, target_path, op.interval_start_date, op.interval_stop_date)
             logging.info('done wasabi2_extract_pools() *****************************')
             free_memory(data)
@@ -3336,12 +3341,12 @@ def main(argv=None):
 
             # WW2 needs additional treatment - detect and fix origin of WW1 inflows as friends
             # Do first separated pools, then the original (large) unseparated one
-            write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1', operation_file, 'w')
+            op.set_current_op('fix_ww2_for_fdnp_ww1')
             for pool_name in mix_ids:
                 fix_ww2_for_fdnp_ww1(pool_name, target_path)
 
             for pool_name in mix_ids:
-                write_to_file(f'{cmd_str} process_and_save_intervals_filter({pool_name}', operation_file, 'w')
+                op.set_current_op(f'process_and_save_intervals_filter({pool_name}')
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 pool_interval_start_date = split_pool_info[pool_name]['start_date']
                 if op.interval_start_date != "" and pool_interval_start_date < op.interval_start_date:
@@ -3359,7 +3364,7 @@ def main(argv=None):
     if op.STREAMLINE_MIX_DATA:
         if op.CJ_TYPE == CoinjoinType.WW2:
             for pool_name in op.MIX_IDS:
-                write_to_file(f'{cmd_str} streamline_coinjoins_structure({pool_name}', operation_file, 'w')
+                op.set_current_op(f'streamline_coinjoins_structure({pool_name}')
                 data = als.load_coinjoins_from_file(os.path.join(target_path, pool_name), None, False)
                 als.streamline_coinjoins_structure(data)
                 als.save_json_to_file(os.path.join(target_path, pool_name, 'coinjoin_tx_info.json'), data)
@@ -3371,12 +3376,12 @@ def main(argv=None):
         if op.CJ_TYPE == CoinjoinType.WW2:
             for pool_name in op.MIX_IDS:
                 logging.info(f'Going to fix_ww2_for_fdnp_ww1({pool_name}) *****************************')
-                write_to_file(f'{cmd_str} fix_ww2_for_fdnp_ww1({pool_name})', operation_file, 'w')
+                op.set_current_op(f'fix_ww2_for_fdnp_ww1({pool_name})')
                 fix_ww2_for_fdnp_ww1(pool_name, target_path)
                 logging.info(f'done fix_ww2_for_fdnp_ww1({pool_name}) *****************************')
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 interval_start_date = '2022-06-01 00:00:07.000' if op.interval_start_date == "" else op.interval_start_date
-                write_to_file(f'{cmd_str} process_and_save_intervals_filter({pool_name})', operation_file, 'w')
+                op.set_current_op(f'process_and_save_intervals_filter({pool_name})')
                 process_and_save_intervals_filter(pool_name, MIX_PROTOCOL.WASABI2, target_path, interval_start_date,
                                                   op.interval_stop_date,
                                                   'Wasabi2CoinJoins.txt', 'Wasabi2PostMixTxs.txt', None,
@@ -3531,11 +3536,11 @@ def main(argv=None):
 
             # Force MIX_IDS subset if required
             selected_coords = selected_coords_default if op.MIX_IDS == "" else op.MIX_IDS
-            write_to_file(f'{cmd_str} wasabi2_extract_other_pools', operation_file, 'w')
+            op.set_current_op(f'wasabi2_extract_other_pools')
             split_pool_info = wasabi2_extract_other_pools(selected_coords, data, target_path, op.interval_stop_date, coord_tx_mapping)
 
             # Perform splitting into month intervals for all processed coordinators
-            write_to_file(f'{cmd_str} split_pools', operation_file, 'w')
+            op.set_current_op(f'split_pools')
             for pool_name in split_pool_info.keys():
                 logging.info(f'Going to process_and_save_intervals_filter({pool_name}) *****************************')
                 pool_data = process_and_save_intervals_filter(pool_name, MIX_PROTOCOL.WASABI2, target_path,
