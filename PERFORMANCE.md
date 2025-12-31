@@ -1,0 +1,36 @@
+# Performance
+
+The processing and visualization of all coinjoins done by the [```coinjoin-analysis```](https://github.com/crocs-muni/coinjoin-analysis/) tooling are time-consuming and memory-intensive operations and need to be considered before usage. The design decision is to target a computational platform that is powerful, yet still easily accessible in academic settings. 
+
+As of December 2025, the current nightly complete processing is performed on a machine with 128GB RAM and Intel 13th Gen Intel(R) Core(TM) i7-13700KF with 24 cores and finishes in about 2 hours 40 mins with 88GB peak usage. The peak memory usage is required only for short time intervals, with a large majority of computation requiring less than 60GB; therefore, a machine with 64GB RAM and 32GB swap file shall also be applicable (although not optimal for the SSD wear). 
+
+![memlog.csv_20251231.png](docs/images/memlog.csv_20251231.png)
+
+The custom performance profiling setup is used, combining [```log_perf.sh```](https://github.com/crocs-muni/coinjoin-analysis/blob/main/scripts/log_perf.sh) measurements with custom data produced by measured scripts. [```perf_processing.py```](https://github.com/crocs-muni/coinjoin-analysis/blob/main/src/helpers/perf_processing.py) is used for visualization.
+
+## Optimization techniques used
+
+The optimization utilizes the following primary techniques:
+ * Decrease peak memory usage by splitting operations into separate Python calls to enforce garbage collection (```del ``` and ```gc.collect()``` do not work).
+ * Decrease peak memory usage by compacting/pruning data structures loaded into memory (```PERF_USE_COMPACT_CJTX_STRUCTURE=True```).
+ * Decrease processing time by parallelization of tasks over multiple CPU cores (```ProcessPoolExecutor``` used).
+ * Decrease processing time by the use of fast access structures (typically HashMap).
+
+**Note 1:** The parallelization over multiple cores typically also increases combined memory usage due to data utilized by every core. The number of real available cores is obtained via ```multiprocessing.cpu_count()```, but limited to the upper bound of ```SAFE_CPU_CORES=24``` to limit peak RAM usage. If both more memory and cores are available, increase the ```SAFE_CPU_CORES``` value in ```cj_consts.py```.  
+
+**Note 2:** The memory requirements slowly grow over time as more coinjoins are processed in total. 
+
+## Performance snapshot 2025-12-31
+ * Total processing time: 2 hours 40 mins, peak RAM usage: 88.0 GB
+ * Processing of the complete ```'wasabi2'``` folder was separated from the rest of the WW2 pools into a separate python invocation to decrease peak memory usage (```STREAMLINE_MIX_DATA```, ```FIX_WW2_FDNP```) from 102.2GB to 88.0 GB.
+ * Parallelization of aggregate plotting of a whole mix interval (```PLOT_REMIXES_AGGREGATE=True```, e.g., ```wasabi2_cummul_values_norm.png```) for all mix designs (ww1, ww2, sw, aw, jm). Decreased plotting time 62 mins -> 30 mins (sw) and 27 -> 15 mins (ww2). Parallelization is performed over all pools for the given configuration to prevent memory overflow.
+
+![memlog.csv_20251231.png](docs/images/memlog.csv_20251231.png)
+
+## Performance snapshot 2025-12-08
+* Total processing time: 3h 24min, peak RAM usage: 102.2 GB
+* Initial performance-profiled version, most of the optimization techniques already applied
+
+![memlog.csv_20251231.png](docs/images/memlog.csv_20251208.png)
+
+
