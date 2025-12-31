@@ -817,10 +817,11 @@ def compute_real_addresses(data: dict):
     def compute_address(script):
         return script, als.get_address(script)[0]
 
-    logging.debug(f'Obtaining addresses from scripts, using {multiprocessing.cpu_count()} threads')
+    max_processes = min(multiprocessing.cpu_count(), op.MAX_CPU_CORES)
+    logging.debug(f'Obtaining addresses from scripts, using {max_processes} threads')
     results = {}
     with tqdm(total=len(scripts_only)) as progress:
-        for result in ThreadPool(multiprocessing.cpu_count()).imap(compute_address, scripts_only):
+        for result in ThreadPool(max_processes).imap(compute_address, scripts_only):
             progress.update(1)
             results[result[0]] = result[1]
 
@@ -2614,6 +2615,8 @@ class DumplingsParseOptions:
     FIX_WW2_FDNP = False
     STREAMLINE_MIX_DATA = False
 
+    MAX_CPU_CORES = cjc.SAFE_CPU_CORES
+
     target_base_path = ''
     #interval_stop_date = '2024-10-10 00:00:07.000'  # Last date to be analyzed, e.g., 2024-10-10 00:00:07.000
     now = datetime.now()
@@ -2673,6 +2676,7 @@ class DumplingsParseOptions:
                         setattr(self, key, value)
                     else:
                         logging.warning(f"'{item}' command line is not a recognized attribute and will be ignored.")
+
     def default_values(self):
         self.DEBUG = False
         self.CJ_TYPE = CoinjoinType.WW2
@@ -2724,6 +2728,8 @@ class DumplingsParseOptions:
         self.PLOT_REMIXES_FLOWS = False
         self.PLOT_INTERMIX_FLOWS = False
         self.VISUALIZE_ALL_COINJOINS_INTERVALS = False
+
+        self.MAX_CPU_CORES = cjc.SAFE_CPU_CORES
 
         self.target_base_path = ""
         # If not set, then use current date => take all coinjoins, no limit
@@ -2813,7 +2819,7 @@ def wasabi_plot_remixes_parallel(mix_id: str, mix_protocol: MIX_PROTOCOL, target
                                  analyze_values: bool = True, normalize_values: bool = True,
                                  restrict_to_out_size = None, restrict_to_in_size = None,
                                  plot_multi_graphs: bool = False, plot_single_intervals: bool = False, plot_aggregate: bool = False):
-    max_processes = multiprocessing.cpu_count()
+    max_processes = min(multiprocessing.cpu_count(), op.MAX_CPU_CORES)
     if plot_single_intervals:  # Single intervals can be processed in parallel
         #
         # Plot only single intervals, plotting done in parallel for speedup (works only on Linux, not Windows)
@@ -3608,22 +3614,63 @@ def main(argv=None):
 
     if op.PLOT_REMIXES:
         def ww_plot_remixes_helper(mix_ids_default: list, mix_protocol):
+            if op.PLOT_REMIXES_AGGREGATE:
+                # Paralelization on the level of mixes to prevent issues with memory peak usage
+                # (all mixes together will fit into RAM for given analysis type while several instances for single big mix may not)
+                ww_plot_remixes_helper_parallel(mix_ids_default, mix_protocol)
+            elif op.PLOT_REMIXES_SINGLE_INTERVAL:
+                # Parallelization on the level of monthly intervals (if single mix fits into RAM, then all its months will likely as well)
+                ww_plot_remixes_helper_standard(mix_ids_default, mix_protocol)
+            else:
+                # NO special treatment on this level
+                ww_plot_remixes_helper_standard(mix_ids_default, mix_protocol)
+
+        def ww_plot_remixes_helper_standard(mix_ids_default: list, mix_protocol):
             # Force MIX_IDS subset if required
             mix_ids = mix_ids_default if op.MIX_IDS == "" else op.MIX_IDS
             logging.info(f'Going to process following mixes: {mix_ids}')
             for mix_id in mix_ids:
                 target_base_path = os.path.join(target_path, mix_id)
                 if os.path.exists(target_base_path):
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', False, False, None, None,
+                    wasabi_plot_remixes(mix_id, mix_protocol, target_base_path, 'coinjoin_tx_info.json', False, False, None, None,
                                         op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', False, True, None, None,
+                    wasabi_plot_remixes(mix_id, mix_protocol, target_base_path, 'coinjoin_tx_info.json', False, True, None, None,
                                         op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', True, False, None, None,
+                    wasabi_plot_remixes(mix_id, mix_protocol, target_base_path, 'coinjoin_tx_info.json', True, False, None, None,
                                         op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
-                    wasabi_plot_remixes(mix_id, mix_protocol, os.path.join(target_path, mix_id), 'coinjoin_tx_info.json', True, True, None, None,
+                    wasabi_plot_remixes(mix_id, mix_protocol, target_base_path, 'coinjoin_tx_info.json', True, True, None, None,
                                         op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE)
                 else:
                     logging.warning(f'Path {target_base_path} does not exists.')
+
+        def ww_plot_remixes_helper_parallel(mix_ids_default: list, mix_protocol):
+            # Force MIX_IDS subset if required
+            mix_ids = mix_ids_default if op.MIX_IDS == "" else op.MIX_IDS
+            logging.info(f'Going to process following mixes: {mix_ids}')
+            plot_configurations = [(False, False), (False, True), (True, False), (True, True)]  # analyze_values & normalize_values
+            for cfg in plot_configurations:
+                analyze_values = cfg[0]
+                normalize_values = cfg[1]
+                op.set_current_op(f'plot(vals={analyze_values}/norm={normalize_values}')
+                # Parallelize over all mixes
+                max_processes = min(multiprocessing.cpu_count(), op.MAX_CPU_CORES)
+                with ProcessPoolExecutor(max_workers=max_processes) as executor:
+                    futures = {
+                        executor.submit(
+                            cjvis.wasabi_plot_remixes_worker, mix_id, mix_protocol, os.path.join(target_path, mix_id),
+                            'coinjoin_tx_info.json', op.SORT_COINJOINS_BY_RELATIVE_ORDER,
+                            analyze_values, normalize_values, None, None,
+                            op.PLOT_REMIXES_MULTIGRAPH, op.PLOT_REMIXES_SINGLE_INTERVAL, op.PLOT_REMIXES_AGGREGATE
+                        ): mix_id for mix_id in mix_ids if os.path.exists(os.path.join(target_path, mix_id))
+                    }
+                    with tqdm(total=len(mix_ids)) as progress:
+                        for future in as_completed(futures):
+                            try:
+                                result = future.result()
+                                progress.update(1)
+                            except Exception as e:
+                                logging.error(str(e))
+
 
         if op.CJ_TYPE == CoinjoinType.WW1:
             ww_plot_remixes_helper(['wasabi1_mystery', 'wasabi1_zksnacks', 'wasabi1_others', 'wasabi1'], MIX_PROTOCOL.WASABI1)
