@@ -4,6 +4,7 @@ import math
 import random
 import re
 import shutil
+import glob
 import json
 import emulation.wcli as wcli
 from graphviz import Digraph
@@ -75,6 +76,76 @@ def longest_common_prefix(paths):
     prefix = os.path.commonprefix(paths)
     # Ensure prefix aligns with a directory boundary
     return prefix if prefix.endswith(os.sep) else os.path.dirname(prefix)
+
+
+def unique_paths(paths):
+    result = []
+    seen = set()
+    for path in paths:
+        normalized = os.path.normpath(path)
+        if normalized not in seen:
+            result.append(path)
+            seen.add(normalized)
+    return result
+
+
+def existing_file_candidates(base_path, relative_paths, relative_globs):
+    paths = [os.path.join(base_path, path) for path in relative_paths]
+    for pattern in relative_globs:
+        paths.extend(glob.glob(os.path.join(base_path, pattern), recursive=True))
+    return [path for path in unique_paths(paths) if os.path.isfile(path)]
+
+
+def wasabi_coordinator_log_search_patterns(base_path):
+    relative_paths = [
+        os.path.join('WalletWasabi', 'Backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-coordinator', 'coordinator', 'Logs.txt'),
+        os.path.join('data', 'wasabi-coordinator', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend', 'backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend-2.6', 'backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend-2.6', 'Logs.txt'),
+    ]
+    relative_globs = [
+        os.path.join('data', 'wasabi-coordinator*', '**', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend*', '**', 'Logs.txt'),
+    ]
+    return [os.path.join(base_path, path) for path in relative_paths + relative_globs]
+
+
+def find_wasabi_coordinator_log_files(base_path):
+    relative_paths = [
+        os.path.join('WalletWasabi', 'Backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-coordinator', 'coordinator', 'Logs.txt'),
+        os.path.join('data', 'wasabi-coordinator', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend', 'backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend-2.6', 'backend', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend-2.6', 'Logs.txt'),
+    ]
+    relative_globs = [
+        os.path.join('data', 'wasabi-coordinator*', '**', 'Logs.txt'),
+        os.path.join('data', 'wasabi-backend*', '**', 'Logs.txt'),
+    ]
+    return existing_file_candidates(base_path, relative_paths, relative_globs)
+
+
+def find_wasabi_prison_file(base_path):
+    relative_paths = [
+        os.path.join('WalletWasabi', 'Backend', 'WabiSabi', 'Prison.txt'),
+        os.path.join('data', 'wasabi-coordinator', 'coordinator', 'WabiSabi', 'Prison.txt'),
+        os.path.join('data', 'wasabi-coordinator', 'WabiSabi', 'Prison.txt'),
+        os.path.join('data', 'wasabi-backend', 'backend', 'WabiSabi', 'Prison.txt'),
+        os.path.join('data', 'wasabi-backend', 'WabiSabi', 'Prison.txt'),
+        os.path.join('data', 'wasabi-backend-2.6', 'backend', 'WabiSabi', 'Prison.txt'),
+        os.path.join('data', 'wasabi-backend-2.6', 'WabiSabi', 'Prison.txt'),
+    ]
+    relative_globs = [
+        os.path.join('data', 'wasabi-coordinator*', '**', 'Prison.txt'),
+        os.path.join('data', 'wasabi-backend*', '**', 'Prison.txt'),
+    ]
+    candidates = existing_file_candidates(base_path, relative_paths, relative_globs)
+    return candidates[0] if candidates else None
 
 
 # Define a custom JSON encoder that handles Decimal objects
@@ -2386,14 +2457,12 @@ def fix_coordinator_wallet_addresses(cjtx_stats):
 
 
 def load_prison_data(cjtx_stats, base_path):
-    prison_file = os.path.join(base_path, "WalletWasabi", "Backend", "WabiSabi", "Prison.txt")
-    if not os.path.exists(prison_file):
-        prison_file = os.path.join(base_path, "data", "wasabi-backend", "backend", "WabiSabi", "Prison.txt")
+    prison_file = find_wasabi_prison_file(base_path)
     items_in_prison = 0
 
     #detect prison version (<2.0.4 is different than >=2.0.4)
 
-    if os.path.exists(prison_file):
+    if prison_file and os.path.exists(prison_file):
         with open(prison_file, 'r') as csv_file:
             reader = csv.reader(csv_file, delimiter=',')
             for row in reader:
@@ -2591,18 +2660,33 @@ def process_experiment(args):
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
         # Parse conjoins from logs
-        # Case 1: Local WalletWasabi folder
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'WalletWasabi/Backend/Logs.txt')
-        if os.path.exists(coord_input_file):
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
-        # Case 2: Docker with wasabi client
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'wasabi-backend', 'backend', 'Logs.txt')
-        if os.path.exists(coord_input_file):
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
-        # Case 3: Docker with joinmarket client
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
-        if os.path.exists(coord_input_file):
+        coinjoin_log_file = None
+        joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
+        if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+        else:
+            parsed_without_complete_rounds = []
+            for coord_input_file in find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR):
+                parsed_coinjoins = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
+                if len(parsed_coinjoins) > 0:
+                    cjtx_stats['coinjoins'] = parsed_coinjoins
+                    coinjoin_log_file = coord_input_file
+                    break
+                parsed_without_complete_rounds.append(coord_input_file)
+
+            if 'coinjoins' not in cjtx_stats:
+                if parsed_without_complete_rounds:
+                    searched = '\n  '.join(parsed_without_complete_rounds)
+                    raise ValueError(
+                        'No complete Wasabi coinjoin transactions were found in coordinator logs. '
+                        f'Parsed files:\n  {searched}'
+                    )
+
+                searched = '\n  '.join(wasabi_coordinator_log_search_patterns(WASABIWALLET_DATA_DIR))
+                raise FileNotFoundError(
+                    'No Wasabi coordinator log file found for emulation analysis. '
+                    f'Searched:\n  {searched}'
+                )
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
@@ -2612,11 +2696,12 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS:
-            coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'WalletWasabi/Backend/Logs.txt')
-            if not os.path.exists(coord_input_file):  # if not found, try dockerized path
-                coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'wasabi-backend', 'backend', 'Logs.txt')
-            parse_coinjoin_errors(cjtx_stats, coord_input_file)
+        if op.PARSE_ERRORS and coinjoin_log_file:
+            parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
+        elif op.PARSE_ERRORS:
+            if 'rounds' not in cjtx_stats:
+                cjtx_stats['rounds'] = {'no_round': []}
+            logging.info('Skipping Wasabi coordinator error parsing; no Wasabi coordinator log was used.')
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:
@@ -3472,4 +3557,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

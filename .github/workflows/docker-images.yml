@@ -6,6 +6,7 @@ on:
     branches:
       - main
     paths:
+      - "src/**"
       - "docker/**"
       - "requirements.txt"
       - "setup.py"
