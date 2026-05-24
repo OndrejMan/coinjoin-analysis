@@ -1,0 +1,16 @@
+.git
+.gitignore
+.pytest_cache
+.mypy_cache
+__pycache__
+*.py[cod]
+*.pyo
+.DS_Store
+venv
+.venv
+runs
+logs
+temp_dumplings
+temp_emul
+*.log
+*.tmp
