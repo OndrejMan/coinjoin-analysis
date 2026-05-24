@@ -2,15 +2,6 @@ name: Build and Push Docker Images to GHCR
 
 on:
   workflow_dispatch:
-    inputs:
-      emulator_repository:
-        description: "Repository containing coinjoin-emulator"
-        required: true
-        default: "OndrejMan/coinjoin-emulator"
-      emulator_ref:
-        description: "Branch, tag, or commit to build from coinjoin-emulator"
-        required: true
-        default: "main"
   push:
     branches:
       - main
@@ -30,24 +21,13 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout coinjoin-analysis
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          path: coinjoin-analysis
-
-      - name: Checkout coinjoin-emulator
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event_name == 'workflow_dispatch' && inputs.emulator_repository || 'OndrejMan/coinjoin-emulator' }}
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.emulator_ref || 'main' }}
-          path: coinjoin-emulator
-          token: ${{ secrets.EMULATOR_REPO_TOKEN || github.token }}
 
       - name: Set lowercase image names
         run: |
           echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
           echo "ANALYSIS_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/coinjoin-analysis" >> "$GITHUB_ENV"
-          echo "EMULATOR_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/coinjoin-emulator-manager" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -74,28 +54,9 @@ jobs:
       - name: Build and push coinjoin-analysis image
         uses: docker/build-push-action@v5
         with:
-          context: ./coinjoin-analysis
-          file: ./coinjoin-analysis/docker/analysis.Dockerfile
+          context: .
+          file: ./docker/analysis.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.analysis-meta.outputs.tags }}
           labels: ${{ steps.analysis-meta.outputs.labels }}
-
-      - name: Extract emulator metadata
-        id: emulator-meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.EMULATOR_IMAGE }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha
-
-      - name: Build and push coinjoin-emulator manager image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./coinjoin-emulator
-          file: ./coinjoin-emulator/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.emulator-meta.outputs.tags }}
-          labels: ${{ steps.emulator-meta.outputs.labels }}
