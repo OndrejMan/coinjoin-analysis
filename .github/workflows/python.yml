@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     name: Tests
-    runs-on: [self-hosted, x86]
+    runs-on: [self-hosted, x64]
 
     steps:
     - name: Show environment paths
