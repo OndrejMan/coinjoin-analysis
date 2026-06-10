@@ -21,22 +21,23 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+    - name: Show Python version
+      run: python3 --version
+
+    - name: Create virtual environment
+      run: python3 -m venv .venv
 
     - name: Upgrade pip
-      run: python3 -m pip install --upgrade pip
+      run: .venv/bin/python -m pip install --upgrade pip
 
     - name: Show pip version
-      run: python3 -m pip -V
+      run: .venv/bin/python -m pip -V
 
     - name: Install dependencies
-      run: python3 -m pip install -r requirements.txt
+      run: .venv/bin/python -m pip install -r requirements.txt
 
     - name: Install project in editable mode
-      run: python3 -m pip install -e .
+      run: .venv/bin/python -m pip install -e .
 
     - name: Install Linux system dependencies
       if: runner.os == 'Linux'
@@ -46,8 +47,8 @@ jobs:
 
     - name: Run tests
       run: |
-        python3 -m pip install pytest
-        pytest
+        .venv/bin/python -m pip install pytest
+        .venv/bin/python -m pytest
 
     - name: Show directory structure with tree
       if: always()
