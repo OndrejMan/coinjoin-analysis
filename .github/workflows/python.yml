@@ -13,7 +13,10 @@ jobs:
 
     steps:
     - name: Show environment paths
-      run: python -c "import os, pathlib; print('HOME:', pathlib.Path.home()); print('PWD:', pathlib.Path.cwd()); print('GITHUB_WORKSPACE:', os.environ.get('GITHUB_WORKSPACE', ''))"
+      run: |
+        echo "HOME: $HOME"
+        echo "PWD: $PWD"
+        echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE:-}"
 
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -24,16 +27,16 @@ jobs:
         python-version: '3.11'
 
     - name: Upgrade pip
-      run: python -m pip install --upgrade pip
+      run: python3 -m pip install --upgrade pip
 
     - name: Show pip version
-      run: python -m pip -V
+      run: python3 -m pip -V
 
     - name: Install dependencies
-      run: python -m pip install -r requirements.txt
+      run: python3 -m pip install -r requirements.txt
 
     - name: Install project in editable mode
-      run: python -m pip install -e .
+      run: python3 -m pip install -e .
 
     - name: Install Linux system dependencies
       if: runner.os == 'Linux'
@@ -43,9 +46,16 @@ jobs:
 
     - name: Run tests
       run: |
-        python -m pip install pytest
+        python3 -m pip install pytest
         pytest
 
     - name: Show directory structure with tree
       if: always()
-      run: python -c "from pathlib import Path; root = Path.cwd().parent / 'temp_dumplings'; print(root); print('\n'.join(str(p) for p in sorted(root.rglob('*'))[:200]) if root.exists() else 'Directory not found')"
+      run: |
+        root="$(dirname "$PWD")/temp_dumplings"
+        echo "$root"
+        if [ -d "$root" ]; then
+          find "$root" | sort | head -n 200
+        else
+          echo "Directory not found"
+        fi
