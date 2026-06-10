@@ -8,12 +8,8 @@ on:
 
 jobs:
   build:
-    name: Tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    name: Tests
+    runs-on: [self-hosted, x86]
 
     steps:
     - name: Show environment paths
@@ -44,12 +40,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y graphviz libsqlite3-0
-
-    - name: Install Windows system dependencies
-      if: runner.os == 'Windows'
-      run: |
-        choco install graphviz -y
-        echo "C:\Program Files\Graphviz\bin" >> $env:GITHUB_PATH
 
     - name: Run tests
       run: |
