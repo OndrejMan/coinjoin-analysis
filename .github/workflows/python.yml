@@ -10,6 +10,8 @@ jobs:
   build:
     name: Tests
     runs-on: [self-hosted, x64]
+    env:
+      PYTHON_3_11: /home/administrator/diplomka/.python/3.11.15/bin/python3.11
 
     steps:
     - name: Show environment paths
@@ -21,11 +23,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Show Python version
-      run: python3 --version
+    - name: Show Python 3.11 version
+      run: "$PYTHON_3_11" --version
 
     - name: Create virtual environment
-      run: python3 -m venv .venv
+      run: "$PYTHON_3_11" -m venv .venv
 
     - name: Upgrade pip
       run: .venv/bin/python -m pip install --upgrade pip
