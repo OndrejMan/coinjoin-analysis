@@ -2373,7 +2373,7 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
         # Sometimes, all_tx_db is not complete for all logged coinjoins
         # Create artificial record for some future time
-        highest_known_mine_time = max([all_tx_db[txid]['mine_time'] for txid in all_tx_db.keys()])
+        highest_known_mine_time = max([all_tx_db[txid]['mine_time'] for txid in all_tx_db.keys()], default=0)
         datetime_obj = datetime.strptime(highest_known_mine_time, "%Y-%m-%d %H:%M:%S.%f")
         datetime_obj = datetime_obj + timedelta(minutes=10)
         highest_known_mine_time_next = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
