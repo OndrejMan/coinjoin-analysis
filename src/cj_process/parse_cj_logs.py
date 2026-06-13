@@ -735,6 +735,12 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
         cjtx_stats['analysis'] = {}
     cjtx_stats['analysis']['path'] = base_path
 
+    if len(coinjoins) == 0:
+        SM.print('No coinjoin transactions found for this experiment.')
+        analysis_stats['num_coinjoins'] = 0
+        analysis_stats['wallets_participation'] = {}
+        return analysis_stats
+
     # Compute same output size statistics
     for cjtx in coinjoins.keys():
         if 'analysis2' not in coinjoins[cjtx]:
@@ -1926,6 +1932,71 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}):
     return cjtx_stats
 
 
+def find_joinmarket_round_events_file(base_path: str):
+    candidate_paths = [
+        os.path.join(base_path, 'data', 'joinmarket_round_events.json'),
+        os.path.join(base_path, 'joinmarket_round_events.json'),
+    ]
+    for candidate_path in candidate_paths:
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return None
+
+
+def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
+    """
+    Obtain JoinMarket coinjoins from emulator-provided round labels.
+    Newer emulator runs may not contain copied jcs-*/joinmarket client logs, but
+    they do contain data/joinmarket_round_events.json with matched txids.
+    """
+    events_file = find_joinmarket_round_events_file(base_path)
+    if events_file is None:
+        return None
+
+    print('Parsing coinjoin-relevant data from JoinMarket round events {}...'.format(events_file), end='')
+    with open(events_file, 'r') as file:
+        round_events = json.load(file)
+
+    cjtx_stats = {}
+    parsed_rounds = {}
+    for event in round_events:
+        txid = event.get('txid')
+        round_id = str(event.get('round_id') or txid or len(parsed_rounds) + 1)
+        timestamp = (
+            event.get('broadcast_time')
+            or event.get('timestamp')
+            or event.get('round_start_time')
+        )
+        if txid and txid in raw_tx_db:
+            timestamp = timestamp or raw_tx_db[txid].get('mine_time')
+
+        if timestamp:
+            parsed_rounds[round_id] = {'round_start_timestamp': timestamp}
+        else:
+            parsed_rounds[round_id] = {}
+
+        if not txid:
+            continue
+
+        tx_record = extract_tx_info(txid, raw_tx_db)
+        if tx_record is not None:
+            tx_record['round_id'] = round_id
+            tx_record['round_start_time'] = timestamp or '2009-01-01 00:00:00.000'
+            tx_record['broadcast_time'] = timestamp or '2009-01-01 00:00:00.000'
+            tx_record['is_blame_round'] = False
+            tx_record['is_cjtx'] = True
+            tx_record['joinmarket_round_event'] = event
+            cjtx_stats[txid] = tx_record
+        else:
+            print('ERROR: decoding transaction for tx={}'.format(txid))
+        print('.', end='')
+    print('done')
+
+    SM.print('Total JoinMarket round events loaded: {}'.format(len(round_events)))
+    SM.print('Total fully finished coinjoins processed from round events: {}'.format(len(cjtx_stats.keys())))
+    return cjtx_stats, parsed_rounds
+
+
 def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}):
     print('Parsing coinjoin-relevant data from coordinator logs {}...'.format(coord_input_file), end='')
     if PRE_2_0_4_VERSION:
@@ -2676,6 +2747,8 @@ def process_experiment(args):
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+        elif find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR):
+            cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
         else:
             parsed_without_complete_rounds = []
             for coord_input_file in find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR):
