@@ -1199,6 +1199,8 @@ def compute_link_between_inputs_and_outputs(coinjoins, sorted_cjs_in_scope):
     for cjtx in coinjoins.keys():
         record = coinjoins[cjtx]
         for index in record['outputs'].keys():
+            if 'anon_score' not in record['outputs'][index].keys():
+                record['outputs'][index]['anon_score'] = 1.0
             if 'spend_by_txid' in record['outputs'][index].keys():
                 txid, tx_index = record['outputs'][index]['spend_by_txid']
                 #tx_index = str(tx_index)
@@ -2117,4 +2119,3 @@ def get_missing_cjtxs(cjtxs: dict, mappings: dict, dataset_names: list, target_p
                           list(missing_cjtxs.keys()))
 
     return missing_cjtxs, missing_crawl
-
