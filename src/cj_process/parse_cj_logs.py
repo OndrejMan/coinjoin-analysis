@@ -2785,16 +2785,19 @@ def process_experiment(args):
             if 'coinjoins' not in cjtx_stats:
                 if parsed_without_complete_rounds:
                     searched = '\n  '.join(parsed_without_complete_rounds)
-                    raise ValueError(
+                    logging.warning(
                         'No complete Wasabi coinjoin transactions were found in coordinator logs. '
                         f'Parsed files:\n  {searched}'
                     )
-
-                searched = '\n  '.join(wasabi_coordinator_log_search_patterns(WASABIWALLET_DATA_DIR))
-                raise FileNotFoundError(
-                    'No Wasabi coordinator log file found for emulation analysis. '
-                    f'Searched:\n  {searched}'
-                )
+                    cjtx_stats['coinjoins'] = {}
+                    cjtx_stats['rounds'] = {'no_round': []}
+                    coinjoin_log_file = None
+                else:
+                    searched = '\n  '.join(wasabi_coordinator_log_search_patterns(WASABIWALLET_DATA_DIR))
+                    raise FileNotFoundError(
+                        'No Wasabi coordinator log file found for emulation analysis. '
+                        f'Searched:\n  {searched}'
+                    )
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
