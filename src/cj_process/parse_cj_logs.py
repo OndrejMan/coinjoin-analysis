@@ -3327,8 +3327,6 @@ def parse_arguments(argv):
                         action="store", metavar="ENV_VARS",
                         required=False)
 
-    parser.print_help()
-
     return parser.parse_args(argv)
 
 
