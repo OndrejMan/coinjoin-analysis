@@ -14,6 +14,7 @@ import numpy as np
 from datetime import timedelta, datetime, UTC
 import re
 import math
+from decimal import Decimal
 #from  txstore import TxStore, TxStoreMsgPack
 
 from bitcoin.core import CTransaction, CMutableTransaction, CTxWitness
@@ -39,6 +40,11 @@ SORT_COINJOINS_BY_RELATIVE_ORDER = True
 PERF_USE_COMPACT_CJTX_STRUCTURE = False  # If True, more compacted dictionary with coinjoin records is used
 PERF_USE_SHORT_TXID = False
 PERF_TX_SHORT_LEN = 16
+
+
+def btc_to_sats(value: int | float | str) -> int:
+    """Convert a JSON-RPC BTC amount to satoshis without binary float truncation."""
+    return int(Decimal(str(value)) * SATS_IN_BTC)
 
 
 def load_json_from_file(file_path: str | Path) -> dict:
@@ -1553,7 +1559,7 @@ def extract_tx_info(txid: str, raw_txs: dict):
             tx_record['inputs'][str(index)] = {}
             tx_record['inputs'][str(index)]['address'] = in_address
             tx_record['inputs'][str(index)]['txid'] = input['txid']
-            tx_record['inputs'][str(index)]['value'] = int(in_full_info['vout'][input['vout']]['value'] * SATS_IN_BTC)
+            tx_record['inputs'][str(index)]['value'] = btc_to_sats(in_full_info['vout'][input['vout']]['value'])
             tx_record['inputs'][str(index)]['spending_tx'] = get_output_name_string(input['txid'], input['vout'])
             tx_record['inputs'][str(index)]['wallet_name'] = 'real_unknown'
 
@@ -1566,7 +1572,7 @@ def extract_tx_info(txid: str, raw_txs: dict):
             output_addresses[str(index)] = output['scriptPubKey']['address']
             tx_record['outputs'][str(index)] = {}
             tx_record['outputs'][str(index)]['address'] = output['scriptPubKey']['address']
-            tx_record['outputs'][str(index)]['value'] = int(output['value'] * SATS_IN_BTC)
+            tx_record['outputs'][str(index)]['value'] = btc_to_sats(output['value'])
             # tx_record['outputs'][str(index)]['spend_by_tx'] = get_input_name_string(output['txid'], output['vout'])
             tx_record['outputs'][str(index)]['wallet_name'] = 'real_unknown'
 
