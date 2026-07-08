@@ -27,6 +27,14 @@ emulation_target_path() {
         echo "${args[$((index + 1))]:-/runs/emulation/logs}"
         return
         ;;
+      --target-path=*)
+        echo "${args[$index]#--target-path=}"
+        return
+        ;;
+      -tp=*)
+        echo "${args[$index]#-tp=}"
+        return
+        ;;
     esac
     index=$((index + 1))
   done
@@ -51,7 +59,7 @@ EOF
     exit 2
   fi
 
-  if ! find "${target_path}" -mindepth 2 -maxdepth 3 -type d -name data | grep -q .; then
+  if [[ -z "$(find "${target_path}" -mindepth 2 -maxdepth 3 -type d -name data -print -quit)" ]]; then
     cat >&2 <<EOF
 No EmuCoinJoin experiments found under: ${target_path}
 

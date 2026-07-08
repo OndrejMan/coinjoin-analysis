@@ -103,8 +103,12 @@ def unique_paths(paths):
 def existing_file_candidates(base_path, relative_paths, relative_globs):
     paths = [os.path.join(base_path, path) for path in relative_paths]
     for pattern in relative_globs:
-        paths.extend(glob.glob(os.path.join(base_path, pattern), recursive=True))
+        paths.extend(sorted(glob.glob(os.path.join(base_path, pattern), recursive=True)))
     return [path for path in unique_paths(paths) if os.path.isfile(path)]
+
+
+def wallet_label(wallet_name):
+    return str(wallet_name) if wallet_name else UNKNOWN_WALLET_STRING
 
 
 def wasabi_coordinator_log_search_patterns(base_path):
@@ -1995,9 +1999,13 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
 
     cjtx_stats = {}
     parsed_rounds = {}
+    dropped_decode_failures = 0
+    dropped_missing_txids = 0
+    missing_time_txids = []
     for event in round_events:
         txid = event.get('txid')
-        round_id = str(event.get('round_id') or txid or len(parsed_rounds) + 1)
+        event_round_id = event.get('round_id')
+        round_id = str(event_round_id if event_round_id is not None else txid or len(parsed_rounds) + 1)
         timestamp = (
             event.get('broadcast_time')
             or event.get('timestamp')
@@ -2012,23 +2020,44 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
             parsed_rounds[round_id] = {}
 
         if not txid:
+            dropped_missing_txids += 1
             continue
 
         tx_record = extract_tx_info(txid, raw_tx_db)
         if tx_record is not None:
+            if not timestamp:
+                missing_time_txids.append(txid)
+                continue
             tx_record['round_id'] = round_id
-            tx_record['round_start_time'] = timestamp or '2009-01-01 00:00:00.000'
-            tx_record['broadcast_time'] = timestamp or '2009-01-01 00:00:00.000'
+            tx_record['round_start_time'] = timestamp
+            tx_record['broadcast_time'] = timestamp
             tx_record['is_blame_round'] = False
             tx_record['is_cjtx'] = True
             tx_record['joinmarket_round_event'] = event
             cjtx_stats[txid] = tx_record
         else:
-            print('ERROR: decoding transaction for tx={}'.format(txid))
+            dropped_decode_failures += 1
+            logging.warning('Dropping JoinMarket round event with undecodable tx=%s', txid)
         print('.', end='')
     print('done')
 
+    if missing_time_txids:
+        raise ValueError(
+            'JoinMarket round events missing broadcast/mine time for txids: {}'.format(
+                ', '.join(str(txid) for txid in missing_time_txids)
+            )
+        )
+    parsed_rounds['_stats'] = {
+        'dropped_missing_txids': dropped_missing_txids,
+        'dropped_decode_failures': dropped_decode_failures,
+    }
     SM.print('Total JoinMarket round events loaded: {}'.format(len(round_events)))
+    SM.print(
+        'JoinMarket round events dropped: missing_txid={}, decode_failures={}'.format(
+            dropped_missing_txids,
+            dropped_decode_failures,
+        )
+    )
     SM.print('Total fully finished coinjoins processed from round events: {}'.format(len(cjtx_stats.keys())))
     return cjtx_stats, parsed_rounds
 
@@ -2338,7 +2367,7 @@ def graphviz_insert_aggregated_connections(cjtx_stats, target_cjtxid, graphdot):
     # Insert edge (for every wallet) with thickness equivalent to sum of input values
 
     # Wallets used in target_cjtxid
-    wallets_used = set([cjtx_stats[target_cjtxid]['inputs'][index].get('wallet_name')
+    wallets_used = set([wallet_label(cjtx_stats[target_cjtxid]['inputs'][index].get('wallet_name'))
                         for index in cjtx_stats[target_cjtxid]['inputs'].keys()])
 
     cjtx = cjtx_stats[target_cjtxid]  # Shortcut for target_cjtxid transaction
@@ -2351,7 +2380,7 @@ def graphviz_insert_aggregated_connections(cjtx_stats, target_cjtxid, graphdot):
         for wallet_name in wallets_used:
             wallet_inputs_sum = 0
             for index in cjtx['inputs'].keys():
-                if wallet_name == cjtx['inputs'][index].get('wallet_name'):
+                if wallet_name == wallet_label(cjtx['inputs'][index].get('wallet_name')):
                     value = cjtx['inputs'][index]['value'] if 'value' in cjtx['inputs'][index] else 1
                     if 'spending_tx' in cjtx['inputs'][index].keys():
                         txid, index = cjtx['inputs'][index]['spending_tx']
@@ -2364,7 +2393,8 @@ def graphviz_insert_aggregated_connections(cjtx_stats, target_cjtxid, graphdot):
             if wallet_inputs_sum > 0:  # Plot connection only if at least some satoshies are transfered
                 width = math.log(int(wallet_inputs_sum), 10)  # The sizes might be very different, use log
                 graphdot.edge(prepare_display_cjtxid(other_cjtxid), prepare_display_cjtxid(target_cjtxid),
-                              color=WALLET_COLORS[wallet_name], style='solid', dir='forward', penwidth=f'{width}')
+                              color=WALLET_COLORS.get(wallet_name, WALLET_COLORS[UNKNOWN_WALLET_STRING]),
+                              style='solid', dir='forward', penwidth=f'{width}')
 
 
 def visualize_coinjoins_aggregated(cjtx_stats, base_path='', output_name='coinjoin_graph', view_pdf=True):
@@ -2733,11 +2763,11 @@ def optimize_txvalue_info(cjtx_stats):
             for input in cjtx_stats['coinjoins'][txid]['inputs'].keys():
                 assert type(cjtx_stats['coinjoins'][txid]['inputs'][input]['value']) is float, 'non-float value'
                 cjtx_stats['coinjoins'][txid]['inputs'][input]['value'] \
-                    = int(cjtx_stats['coinjoins'][txid]['inputs'][input]['value'] * SATS_IN_BTC)
+                    = als.btc_to_sats(cjtx_stats['coinjoins'][txid]['inputs'][input]['value'])
             for output in cjtx_stats['coinjoins'][txid]['outputs'].keys():
                 assert type(cjtx_stats['coinjoins'][txid]['outputs'][output]['value']) is float, 'non-float value'
                 cjtx_stats['coinjoins'][txid]['outputs'][output]['value'] \
-                    = int(cjtx_stats['coinjoins'][txid]['outputs'][output]['value'] * SATS_IN_BTC)
+                    = als.btc_to_sats(cjtx_stats['coinjoins'][txid]['outputs'][output]['value'])
 
     return optimized
 
@@ -2779,7 +2809,7 @@ def process_experiment(args):
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
         # Parse conjoins from logs
-        coinjoin_log_file = None
+        coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
@@ -2790,9 +2820,9 @@ def process_experiment(args):
             for coord_input_file in find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR):
                 parsed_coinjoins = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
                 if len(parsed_coinjoins) > 0:
-                    cjtx_stats['coinjoins'] = parsed_coinjoins
-                    coinjoin_log_file = coord_input_file
-                    break
+                    cjtx_stats.setdefault('coinjoins', {}).update(parsed_coinjoins)
+                    coinjoin_log_files.append(coord_input_file)
+                    continue
                 parsed_without_complete_rounds.append(coord_input_file)
 
             if 'coinjoins' not in cjtx_stats:
@@ -2804,13 +2834,18 @@ def process_experiment(args):
                     )
                     cjtx_stats['coinjoins'] = {}
                     cjtx_stats['rounds'] = {'no_round': []}
-                    coinjoin_log_file = None
+                    coinjoin_log_files = []
                 else:
                     searched = '\n  '.join(wasabi_coordinator_log_search_patterns(WASABIWALLET_DATA_DIR))
                     raise FileNotFoundError(
                         'No Wasabi coordinator log file found for emulation analysis. '
                         f'Searched:\n  {searched}'
                     )
+            elif len(coinjoin_log_files) > 1:
+                logging.warning(
+                    'Merged complete Wasabi coinjoins from multiple coordinator logs: %s',
+                    ', '.join(coinjoin_log_files),
+                )
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
@@ -2820,8 +2855,9 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS and coinjoin_log_file:
-            parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
+        if op.PARSE_ERRORS and coinjoin_log_files:
+            for coinjoin_log_file in coinjoin_log_files:
+                parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
         elif op.PARSE_ERRORS:
             if 'rounds' not in cjtx_stats:
                 cjtx_stats['rounds'] = {'no_round': []}

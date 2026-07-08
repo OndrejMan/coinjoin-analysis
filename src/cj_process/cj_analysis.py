@@ -1202,26 +1202,34 @@ def compute_link_between_inputs_and_outputs(coinjoins, sorted_cjs_in_scope):
     # Update 'anon_score' item for inputs from previous outputs where exist
     #
     # Start with outputs - if spent, then fill anon_score
+    missing_output_anon_scores = 0
     for cjtx in coinjoins.keys():
         record = coinjoins[cjtx]
         for index in record['outputs'].keys():
-            if 'anon_score' not in record['outputs'][index].keys():
-                record['outputs'][index]['anon_score'] = 1.0
+            output_anon_score = record['outputs'][index].get('anon_score')
+            if output_anon_score is None:
+                missing_output_anon_scores += 1
             if 'spend_by_txid' in record['outputs'][index].keys():
                 txid, tx_index = record['outputs'][index]['spend_by_txid']
                 #tx_index = str(tx_index)
-                if txid in coinjoins.keys():
+                if txid in coinjoins.keys() and output_anon_score is not None:
                     if (txid in coinjoins.keys() and
                             'anon_score' in coinjoins[txid]['inputs'][tx_index].keys()):
-                        assert math.isclose(coinjoins[txid]['inputs'][tx_index]['anon_score'], record['outputs'][index]['anon_score'], rel_tol=1e-9)
+                        assert math.isclose(coinjoins[txid]['inputs'][tx_index]['anon_score'], output_anon_score, rel_tol=1e-9)
                     else:
-                        coinjoins[txid]['inputs'][tx_index]['anon_score'] = record['outputs'][index]['anon_score']
-    # Fill all non-set inputs to anonscore 1.0
+                        coinjoins[txid]['inputs'][tx_index]['anon_score'] = output_anon_score
+    missing_input_anon_scores = 0
     for cjtx in coinjoins.keys():
         record = coinjoins[cjtx]
         for index in record['inputs'].keys():
             if 'anon_score' not in record['inputs'][index].keys():
-                record['inputs'][index]['anon_score'] = 1.0
+                missing_input_anon_scores += 1
+    if missing_output_anon_scores or missing_input_anon_scores:
+        logging.warning(
+            "Missing anon_score values: %s outputs, %s inputs; records were not defaulted",
+            missing_output_anon_scores,
+            missing_input_anon_scores,
+        )
 
 
     return coinjoins
