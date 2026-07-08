@@ -39,7 +39,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger_to_disable = logging.getLogger("mathplotlib")
 logger_to_disable.setLevel(logging.WARNING)
 
-BTC_CLI_PATH = 'C:\\bitcoin-25.0\\bin\\bitcoin-cli'
+BTC_CLI_PATH = os.environ.get('BITCOIN_CLI_PATH', 'bitcoin-cli')
 WASABIWALLET_DATA_DIR = ''
 TX_AD_CUT_LEN = 16  # length of displayed address or txid
 WALLET_COLORS = {}
