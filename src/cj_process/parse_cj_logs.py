@@ -2047,10 +2047,6 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
                 ', '.join(str(txid) for txid in missing_time_txids)
             )
         )
-    parsed_rounds['_stats'] = {
-        'dropped_missing_txids': dropped_missing_txids,
-        'dropped_decode_failures': dropped_decode_failures,
-    }
     SM.print('Total JoinMarket round events loaded: {}'.format(len(round_events)))
     SM.print(
         'JoinMarket round events dropped: missing_txid={}, decode_failures={}'.format(
