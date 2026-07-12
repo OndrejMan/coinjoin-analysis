@@ -2491,7 +2491,11 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
                 # Wallet coins (as obtained by 'listcoins' RPC)
                 with open(os.path.join(target_base_path, 'coins.json'), "r") as file:
-                    wallet_coins = json.load(file)
+                    try:
+                        wallet_coins = json.load(file)
+                    except json.JSONDecodeError:
+                        logging.warning(f'Empty or invalid coins.json for \"{target_base_path}\", treating as empty wallet')
+                        wallet_coins = 'timeout'
                     if isinstance(wallet_coins, str) and (wallet_coins.lower() == 'timeout' or wallet_coins.lower() == 'this method is not available in joinmarket'):
                         logging.error(f'Loading wallet keys failed with \"{wallet_coins}\" for \"{target_base_path}\"')
                         wallets_coins_all[wallet_name] = {}
@@ -2506,7 +2510,11 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
                 # Wallet addresses (as obtained by 'listkeys' RPC) - now extracted from 'keys.json' file
                 with open(os.path.join(target_base_path, 'keys.json'), "r") as file:
-                    wallet_keys = json.load(file)
+                    try:
+                        wallet_keys = json.load(file)
+                    except json.JSONDecodeError:
+                        logging.warning(f'Empty or invalid keys.json for \"{target_base_path}\", treating as empty wallet')
+                        wallet_keys = 'timeout'
                     timout_detected = False
                     if isinstance(wallet_coins, str) and (wallet_coins.lower() == 'timeout' or wallet_coins.lower() == 'this method is not available in joinmarket'):
                         timout_detected = True
