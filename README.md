@@ -20,7 +20,15 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
+### Tests
 
+The `tests/` suite needs the project dependencies (notably `orjson`) installed,
+so it only runs after the `pip install -r requirements.txt` step above (or
+inside the analysis container image — `docker/analysis.Dockerfile` runs the
+suite during the image build):
+```
+PYTHONPATH=src python -m pytest tests
+```
 
 ## Supported operations
 
