@@ -2014,11 +2014,6 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
         if txid and txid in raw_tx_db:
             timestamp = timestamp or raw_tx_db[txid].get('mine_time')
 
-        if timestamp:
-            parsed_rounds[round_id] = {'round_start_timestamp': timestamp}
-        else:
-            parsed_rounds[round_id] = {}
-
         if not txid:
             dropped_missing_txids += 1
             continue
@@ -2035,6 +2030,7 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
             tx_record['is_cjtx'] = True
             tx_record['joinmarket_round_event'] = event
             cjtx_stats[txid] = tx_record
+            parsed_rounds[round_id] = {'round_start_timestamp': timestamp}
         else:
             dropped_decode_failures += 1
             logging.warning('Dropping JoinMarket round event with undecodable tx=%s', txid)

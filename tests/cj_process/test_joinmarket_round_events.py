@@ -79,3 +79,28 @@ def test_joinmarket_round_events_allow_empty_label_file(tmp_path):
     assert find_joinmarket_round_events_file(str(tmp_path)) == str(events_file)
     assert coinjoins == {}
     assert rounds == {}
+
+
+def test_dropped_joinmarket_events_do_not_create_rounds(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    events_file = data_dir / "joinmarket_round_events.json"
+    events_file.write_text(
+        json.dumps(
+            [
+                {"round_id": 1, "status": "failed", "txid": None},
+                {
+                    "round_id": 2,
+                    "status": "confirmed",
+                    "txid": "not-in-exported-blocks",
+                    "timestamp": "2026-06-13 09:10:00.000",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    coinjoins, rounds = joinmarket_parse_round_events(str(tmp_path), {})
+
+    assert coinjoins == {}
+    assert rounds == {}

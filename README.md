@@ -22,11 +22,11 @@ pip install -r requirements.txt
 
 ### Tests
 
-The `tests/` suite needs the project dependencies (notably `orjson`) installed,
-so it only runs after the `pip install -r requirements.txt` step above (or
-inside the analysis container image — `docker/analysis.Dockerfile` runs the
-suite during the image build):
+The `tests/` suite needs the project dependencies (notably `orjson`) and pytest.
+Pytest is intentionally installed separately from the runtime requirements;
+the analysis container and CI do the same:
 ```
+python -m pip install pytest
 PYTHONPATH=src python -m pytest tests
 ```
 
@@ -178,6 +178,11 @@ The extraction process creates the following files:
   * ```coinjoin_tx_info.json``` ... basic information about all detected coinjoins, mapping of all wallets to their coins, started rounds, etc.. Used for subsequent analysis.
   * ```wallets_coins.json``` ... information about every output created during execution, mapped to its coinjoin.
   * ```wallets_info.json``` ... information about every address controlled by a given wallet. 
+
+JoinMarket runs can be reconstructed from client logs or from the emulator's
+`joinmarket_round_events.json` fallback. See the
+[JoinMarket round-event input contract](docs/joinmarket-round-events.md) for
+source precedence, required fields, and accepted-round semantics.
 
 <a id="ecj-rerun"></a>
 ### 3. Re-run analysis from already extracted coinjoins (```--action analyze_only```)
