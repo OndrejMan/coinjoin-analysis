@@ -2002,6 +2002,8 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
     dropped_decode_failures = 0
     dropped_missing_txids = 0
     missing_time_txids = []
+    round_txids = {}
+    conflicting_round_ids = []
     for event in round_events:
         txid = event.get('txid')
         event_round_id = event.get('round_id')
@@ -2029,6 +2031,11 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
             tx_record['is_blame_round'] = False
             tx_record['is_cjtx'] = True
             tx_record['joinmarket_round_event'] = event
+            previous_txid = round_txids.get(round_id)
+            if previous_txid is not None and previous_txid != txid:
+                conflicting_round_ids.append((round_id, previous_txid, txid))
+                continue
+            round_txids[round_id] = txid
             cjtx_stats[txid] = tx_record
             parsed_rounds[round_id] = {'round_start_timestamp': timestamp}
         else:
@@ -2041,6 +2048,15 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
         raise ValueError(
             'JoinMarket round events missing broadcast/mine time for txids: {}'.format(
                 ', '.join(str(txid) for txid in missing_time_txids)
+            )
+        )
+    if conflicting_round_ids:
+        raise ValueError(
+            'JoinMarket round ids map to multiple txids: {}'.format(
+                ', '.join(
+                    '{} ({} and {})'.format(round_id, first_txid, second_txid)
+                    for round_id, first_txid, second_txid in conflicting_round_ids
+                )
             )
         )
     SM.print('Total JoinMarket round events loaded: {}'.format(len(round_events)))

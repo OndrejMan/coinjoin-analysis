@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from cj_process.parse_cj_logs import (
     find_joinmarket_round_events_file,
     joinmarket_parse_round_events,
@@ -104,3 +106,27 @@ def test_dropped_joinmarket_events_do_not_create_rounds(tmp_path):
 
     assert coinjoins == {}
     assert rounds == {}
+
+
+def test_duplicate_round_id_with_different_txids_is_rejected(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    events_file = data_dir / "joinmarket_round_events.json"
+    events_file.write_text(
+        json.dumps([
+            {"round_id": 1, "status": "confirmed", "txid": "txA", "timestamp": "2026-01-01"},
+            {"round_id": 1, "status": "confirmed", "txid": "txB", "timestamp": "2026-01-02"},
+        ]),
+        encoding="utf-8",
+    )
+    raw_tx_db = {
+        txid: {
+            "txid": txid,
+            "vin": [],
+            "vout": [],
+        }
+        for txid in ("txA", "txB")
+    }
+
+    with pytest.raises(ValueError, match="round ids map to multiple txids"):
+        joinmarket_parse_round_events(str(tmp_path), raw_tx_db)
