@@ -2,6 +2,10 @@
 
 Set of scripts for processing, analysis, and visualization of coinjoin transactions. Performs processing and visualization of 1) real coinjoins as extracted from Bitcoin mainnet by [Dumplings](https://github.com/nopara73/dumplings) tool (no ground truth knowledge about coins to wallets mapping) and 2) base files with coinjoins for  Wallet Wasabi 1.x, Wallet Wasabi 2.x and JoinMarket clients and coordinators executed in emulated environment by [EmuCoinJoin](https://github.com/crocs-muni/coinjoin-emulator) (known mapping between coins and wallets). 
 
+For a source-oriented overview of the repository, input/output contracts, and
+the exact emulation data flow, see
+[CoinJoin Analysis: architecture and data flow](docs/architecture-and-data-flow.md).
+
 ## Setup
 Clone repository:
 ```
