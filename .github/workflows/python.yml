@@ -11,7 +11,9 @@ jobs:
     name: Tests
     runs-on: [self-hosted, x64]
     env:
-      PYTHON_3_11: /home/administrator/diplomka/.python/3.11.15/bin/python3.11
+      # Interpreter path on the self-hosted runner. Set the PYTHON_3_11
+      # repository variable to override the default location below.
+      PYTHON_3_11_OVERRIDE: ${{ vars.PYTHON_3_11 }}
 
     steps:
     - name: Show environment paths
@@ -19,6 +21,10 @@ jobs:
         echo "HOME: $HOME"
         echo "PWD: $PWD"
         echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE:-}"
+
+    - name: Resolve Python 3.11 interpreter
+      run: |
+        echo "PYTHON_3_11=${PYTHON_3_11_OVERRIDE:-$HOME/diplomka/.python/3.11.15/bin/python3.11}" >> "$GITHUB_ENV"
 
     - name: Checkout repository
       uses: actions/checkout@v3
