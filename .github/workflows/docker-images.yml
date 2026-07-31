@@ -1,0 +1,63 @@
+name: Build and Push Docker Images to GHCR
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "docker/**"
+      - "requirements.txt"
+      - "setup.py"
+      - "compose.yaml"
+      - ".github/workflows/docker-images.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, x64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "ANALYSIS_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/coinjoin-analysis" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract analysis metadata
+        id: analysis-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ANALYSIS_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build and push coinjoin-analysis image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/analysis.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.analysis-meta.outputs.tags }}
+          labels: ${{ steps.analysis-meta.outputs.labels }}
