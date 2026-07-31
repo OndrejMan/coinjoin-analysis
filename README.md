@@ -49,7 +49,6 @@ python -m pip install -r requirements-dev.txt
 PYTHONPATH=src python -m pytest tests
 ```
 
-
 ## Supported operations
 
 1. [Process mainnet coinjoins collected by Dumplings (```parse_dumplings.py```)](#process-dumplings)
@@ -194,10 +193,26 @@ To extract all executed coinjoins into a unified json format and perform analysi
 parse_cj_logs.py --action collect_docker --target-path path_to_experiments
 ```
 
+The same analysis can be run in the provided container. Place each experiment
+directly under `runs/emulation/logs/`, so the resulting layout is
+`runs/emulation/logs/<experiment>/data/`, then run:
+
+```
+docker compose run --rm emulation-process
+```
+
+Set `CJ_RUNS` to override the host-side `runs/` directory mounted into the
+container.
+
 The extraction process creates the following files: 
   * ```coinjoin_tx_info.json``` ... basic information about all detected coinjoins, mapping of all wallets to their coins, started rounds, etc.. Used for subsequent analysis.
   * ```wallets_coins.json``` ... information about every output created during execution, mapped to its coinjoin.
   * ```wallets_info.json``` ... information about every address controlled by a given wallet. 
+
+JoinMarket runs can be reconstructed from client logs or from the emulator's
+`joinmarket_round_events.json` fallback. See the
+[JoinMarket round-event input contract](docs/joinmarket-round-events.md) for
+source precedence, required fields, and accepted-round semantics.
 
 <a id="ecj-rerun"></a>
 ### 3. Re-run analysis from already extracted coinjoins (```--action analyze_only```)
