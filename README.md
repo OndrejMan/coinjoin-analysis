@@ -20,6 +20,13 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
+### Tests
+
+Install the test dependencies (including the runtime requirements and pytest):
+```
+python -m pip install -r requirements-dev.txt
+PYTHONPATH=src python -m pytest tests
+```
 
 
 ## Supported operations
