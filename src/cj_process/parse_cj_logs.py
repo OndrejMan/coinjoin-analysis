@@ -3557,6 +3557,32 @@ def backup_log_files(target_path: str):
         logging.warning(f'Log file {log_file_path} does not found, not copied.')
 
 
+def validate_emulation_target(target_path: str) -> str:
+    path = Path(target_path)
+    if not path.is_dir():
+        raise argparse.ArgumentTypeError(
+            f"EmuCoinJoin output path does not exist: {target_path}"
+        )
+
+    try:
+        has_experiment = any(
+            experiment.is_dir() and (experiment / "data").is_dir()
+            for experiment in path.iterdir()
+        )
+    except OSError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Cannot inspect EmuCoinJoin output path {target_path}: {exc}"
+        ) from exc
+
+    if not has_experiment:
+        raise argparse.ArgumentTypeError(
+            f"No EmuCoinJoin experiments found under {target_path}; "
+            f"expected {target_path}/<experiment>/data/"
+        )
+
+    return target_path
+
+
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action",
@@ -3567,7 +3593,7 @@ def parse_arguments(argv):
                         required=False)
     parser.add_argument("-tp", "--target-path",
                         help="Target path with experiment(s) to be processed.",
-                        action="append", metavar="PATH",
+                        action="append", metavar="PATH", type=validate_emulation_target,
                         required=False)
     parser.add_argument("-lc", "--load-config",
                         help="Load all configuration from file",
