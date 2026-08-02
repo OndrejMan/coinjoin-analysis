@@ -11,6 +11,11 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
+# Re-exported so process_experiment and tests keep addressing them on this module.
+from cj_process.wasabi_coordinator import (
+    find_wasabi_coordinator_log_files,
+    find_wasabi_prison_file,
+)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -2415,14 +2420,12 @@ def fix_coordinator_wallet_addresses(cjtx_stats):
 
 
 def load_prison_data(cjtx_stats, base_path):
-    prison_file = os.path.join(base_path, "WalletWasabi", "Backend", "WabiSabi", "Prison.txt")
-    if not os.path.exists(prison_file):
-        prison_file = os.path.join(base_path, "data", "wasabi-backend", "backend", "WabiSabi", "Prison.txt")
+    prison_file = find_wasabi_prison_file(base_path)
     items_in_prison = 0
 
     #detect prison version (<2.0.4 is different than >=2.0.4)
 
-    if os.path.exists(prison_file):
+    if prison_file and os.path.exists(prison_file):
         with open(prison_file, 'r') as csv_file:
             reader = csv.reader(csv_file, delimiter=',')
             for row in reader:
@@ -2620,17 +2623,13 @@ def process_experiment(args):
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
         # Parse conjoins from logs
-        # Case 1: Local WalletWasabi folder
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'WalletWasabi/Backend/Logs.txt')
-        if os.path.exists(coord_input_file):
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
-        # Case 2: Docker with wasabi client
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'wasabi-backend', 'backend', 'Logs.txt')
-        if os.path.exists(coord_input_file):
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
-        # Case 3: Docker with joinmarket client
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
-        if os.path.exists(coord_input_file):
+        # Case 1: Local or exported Wasabi coordinator logs
+        coordinator_log_files = find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR)
+        for coordinator_log_file in coordinator_log_files:
+            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coordinator_log_file, RAW_TXS_DB)
+        # Case 2: Docker with joinmarket client
+        joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
+        if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
 
         # Build mapping between address and controlling wallet
@@ -2641,11 +2640,9 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS:
-            coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'WalletWasabi/Backend/Logs.txt')
-            if not os.path.exists(coord_input_file):  # if not found, try dockerized path
-                coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'wasabi-backend', 'backend', 'Logs.txt')
-            parse_coinjoin_errors(cjtx_stats, coord_input_file)
+        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
+            for coordinator_log_file in coordinator_log_files:
+                parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:
@@ -3501,4 +3498,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-
