@@ -144,7 +144,7 @@ def read_wasabi_producer_positive_txids(coordinator_log_files, has_manifest):
     return producer_positive_txids
 
 
-def parse_wasabi_logs_by_round_completeness(coordinator_log_files, raw_txs):
+def parse_wasabi_logs_by_round_completeness(coordinator_log_files, raw_txs, allow_rpc):
     """Parse every log and split the files by whether they yielded complete rounds."""
     from cj_process import parse_cj_logs
 
@@ -153,7 +153,9 @@ def parse_wasabi_logs_by_round_completeness(coordinator_log_files, raw_txs):
     incomplete_round_logs = []
 
     for coordinator_log_file in coordinator_log_files:
-        parsed_coinjoins = parse_cj_logs.parse_backend_coinjoin_logs(coordinator_log_file, raw_txs)
+        parsed_coinjoins = parse_cj_logs.parse_backend_coinjoin_logs(
+            coordinator_log_file, raw_txs, allow_rpc=allow_rpc
+        )
         if parsed_coinjoins:
             coinjoins.update(parsed_coinjoins)
             complete_round_logs.append(coordinator_log_file)
@@ -187,7 +189,7 @@ def check_wasabi_parsed_positives(coinjoins, producer_positive_txids):
         )
 
 
-def parse_wasabi_coordinator_coinjoins(base_path, raw_txs):
+def parse_wasabi_coordinator_coinjoins(base_path, raw_txs, allow_rpc: bool = True):
     """Parse integrity-checked Wasabi CoinJoins and return all coordinator logs.
 
     Current runs must have a complete, hash-verified producer manifest whose
@@ -209,7 +211,7 @@ def parse_wasabi_coordinator_coinjoins(base_path, raw_txs):
     check_wasabi_producer_positive_count(producer_positive_txids, expected_positive_count)
 
     coinjoins, complete_round_logs, incomplete_round_logs = parse_wasabi_logs_by_round_completeness(
-        coordinator_log_files, raw_txs
+        coordinator_log_files, raw_txs, allow_rpc
     )
     check_wasabi_parsed_positives(coinjoins, producer_positive_txids)
 

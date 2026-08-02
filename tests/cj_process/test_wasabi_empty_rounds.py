@@ -52,7 +52,7 @@ def test_process_experiment_allows_wasabi_logs_without_complete_rounds(tmp_path)
 
     assert result["coinjoins"] == {}
     assert result["rounds"] == {"no_round": []}
-    parse_backend_coinjoin_logs.assert_called_once_with(str(log_path), {})
+    parse_backend_coinjoin_logs.assert_called_once_with(str(log_path), {}, allow_rpc=False)
     parse_coinjoin_errors.assert_called_once_with(result, str(log_path))
 
     coinjoin_info = json.loads((run_dir / "coinjoin_tx_info.json").read_text(encoding="utf-8"))
@@ -60,6 +60,41 @@ def test_process_experiment_allows_wasabi_logs_without_complete_rounds(tmp_path)
     assert coinjoin_info["coinjoins"] == {}
     assert coinjoin_info["rounds"] == {"no_round": []}
     assert coinjoin_stats["num_coinjoins"] == 0
+
+
+def test_process_experiment_local_uses_rpc_with_empty_transaction_database(tmp_path):
+    options = parse_cj_logs.EmulParseOptions()
+    for name, value in {
+        "LOAD_TXINFO_FROM_FILE": False,
+        "LOAD_TXINFO_FROM_DOCKER_FILES": False,
+        "READ_ONLY_COINJOIN_TX_INFO": False,
+        "ASSUME_COORDINATOR_WALLET": False,
+        "PARSE_ERRORS": True,
+        "LOAD_COMPUTED_TRANSACTION_INFO": False,
+        "SAVE_ANALYTICS_TO_FILE": False,
+        "GENERATE_COINJOIN_GRAPH_BLIND": False,
+        "GENERATE_COINJOIN_GRAPH": False,
+    }.items():
+        setattr(options, name, value)
+
+    with (
+        mock.patch.object(parse_cj_logs, "op", options, create=True),
+        mock.patch.object(parse_cj_logs, "obtain_wallets_info", return_value=({}, {})),
+        mock.patch.object(
+            parse_cj_logs,
+            "parse_wasabi_coordinator_coinjoins",
+            return_value=({}, []),
+        ) as parse_wasabi,
+        mock.patch.object(parse_cj_logs, "load_prison_data"),
+        mock.patch.object(parse_cj_logs, "load_anonscore_data"),
+        mock.patch.object(parse_cj_logs.als, "remove_link_between_inputs_and_outputs"),
+        mock.patch.object(parse_cj_logs.als, "compute_link_between_inputs_and_outputs"),
+        mock.patch.object(parse_cj_logs.als, "analyze_input_out_liquidity"),
+    ):
+        result = parse_cj_logs.process_experiment((str(tmp_path), False))
+
+    assert result["coinjoins"] == {}
+    parse_wasabi.assert_called_once_with(str(tmp_path), {}, allow_rpc=True)
 
 
 def test_empty_round_keeps_round_independent_error_events(tmp_path):
@@ -173,7 +208,7 @@ def test_parse_backend_coinjoin_logs_parses_complete_round(tmp_path):
     with mock.patch.object(parse_cj_logs, "extract_tx_info", return_value=transaction) as extract_tx_info:
         result = parse_cj_logs.parse_backend_coinjoin_logs(str(log_path), {})
 
-    extract_tx_info.assert_called_once_with(txid, {})
+    extract_tx_info.assert_called_once_with(txid, {}, allow_rpc=True)
     assert result == {
         txid: {
             "inputs": {},
