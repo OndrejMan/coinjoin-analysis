@@ -2640,9 +2640,17 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
                     else:
                         wallets_info[wallet_name] = {addr_data['address']: addr_data for addr_data in wallet_keys}
 
-        # Sometimes, all_tx_db is not complete for all logged coinjoins
-        # Create artificial record for some future time
-        highest_known_mine_time = max([all_tx_db[txid]['mine_time'] for txid in all_tx_db.keys()])
+        # Sometimes, all_tx_db is not complete for all logged coinjoins.
+        # Normalize times before comparing them, as the database can contain
+        # Unix timestamps as well as ISO 8601 or legacy timestamp strings.
+        known_mine_times = [
+            format_mine_time(tx['mine_time'])
+            for tx in all_tx_db.values()
+            if 'mine_time' in tx
+        ]
+        # Create an artificial record for some future time.  The epoch gives
+        # empty transaction databases a stable, valid baseline.
+        highest_known_mine_time = max(known_mine_times, default=format_mine_time(0))
         datetime_obj = datetime.strptime(highest_known_mine_time, "%Y-%m-%d %H:%M:%S.%f")
         datetime_obj = datetime_obj + timedelta(minutes=10)
         highest_known_mine_time_next = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -2652,7 +2660,7 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
             for coin in wallets_coins_all[wallet_name]:
                 if coin['txid'] in all_tx_db.keys():
                     coin['block_hash'] = all_tx_db[coin['txid']]['hash']
-                    coin['create_time'] = all_tx_db[coin['txid']]['mine_time']
+                    coin['create_time'] = format_mine_time(all_tx_db[coin['txid']]['mine_time'])
                 else:
                     # Synthetic block info in case of missing block
                     coin['block_hash'] = 'synthetic_block'
@@ -2660,7 +2668,7 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
                 if 'spentBy' in coin.keys():
                     if coin['spentBy'] in all_tx_db.keys():
-                        coin['destroy_time'] = all_tx_db[coin['spentBy']]['mine_time']
+                        coin['destroy_time'] = format_mine_time(all_tx_db[coin['spentBy']]['mine_time'])
                     else:
                         # Synthetic destroy time in case of missing block
                         coin['destroy_time'] = highest_known_mine_time_next
