@@ -604,6 +604,11 @@ def analyze_input_out_liquidity(target_path: str, coinjoins, postmix_spend, prem
     total_mix_leaving = 0
     total_mix_staying = []
     total_utxos = 0
+    if not coinjoins:
+        logging.warning("No coinjoins available for liquidity analysis; writing empty tx_reordering_stats.json")
+        save_json_to_file(os.path.join(target_path, 'tx_reordering_stats.json'), {})
+        logging.debug('analyze_input_out_liquidity() finished')
+        return {}
     broadcast_times = {cjtx: precomp_datetime.strptime(coinjoins[cjtx]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f") for cjtx in coinjoins.keys()}
     if postmix_spend:
         broadcast_times.update({tx: precomp_datetime.strptime(postmix_spend[tx]['broadcast_time'], "%Y-%m-%d %H:%M:%S.%f") for tx in postmix_spend.keys()})
