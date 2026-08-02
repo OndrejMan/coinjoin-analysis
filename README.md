@@ -20,6 +20,18 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
+### Bitcoin Core CLI (optional)
+
+The raw-transaction decoding workflow invokes `bitcoin-cli` from `PATH` by
+default. Set `BITCOIN_CLI_PATH` when the executable is installed elsewhere:
+
+```
+export BITCOIN_CLI_PATH=/opt/bitcoin/bin/bitcoin-cli
+```
+
+The `collect_docker` workflow reads already decoded `data/btc-node/block_*.json`
+files and does not require `bitcoin-cli`.
+
 ### Tests
 
 Install the test dependencies (including the runtime requirements and pytest):
