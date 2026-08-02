@@ -3025,9 +3025,9 @@ def process_experiment(args):
 
         # Parse conjoins from logs
         coinjoin_log_files = []
-        joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         joinmarket_log_files = find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
         joinmarket_round_events_file = find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
+        is_joinmarket = bool(joinmarket_log_files or joinmarket_round_events_file)
         if joinmarket_log_files:
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
@@ -3054,7 +3054,7 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if not os.path.exists(joinmarket_input_path):
+        if not is_joinmarket:
             if op.PARSE_ERRORS and coinjoin_log_files:
                 for coinjoin_log_file in coinjoin_log_files:
                     parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)

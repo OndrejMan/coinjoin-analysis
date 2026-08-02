@@ -1,13 +1,57 @@
 import json
+import logging
 from unittest import mock
 
 import pytest
 
+from cj_process import parse_cj_logs
 from cj_process.parse_cj_logs import (
     find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
     joinmarket_parse_round_events,
 )
+
+
+def test_joinmarket_run_skips_wasabi_error_parsing(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "joinmarket_round_events.json").write_text("[]", encoding="utf-8")
+
+    options = parse_cj_logs.EmulParseOptions()
+    for name, value in {
+        "LOAD_TXINFO_FROM_FILE": False,
+        "LOAD_TXINFO_FROM_DOCKER_FILES": True,
+        "READ_ONLY_COINJOIN_TX_INFO": False,
+        "ASSUME_COORDINATOR_WALLET": False,
+        "PARSE_ERRORS": True,
+        "LOAD_COMPUTED_TRANSACTION_INFO": False,
+        "SAVE_ANALYTICS_TO_FILE": False,
+        "GENERATE_COINJOIN_GRAPH_BLIND": False,
+        "GENERATE_COINJOIN_GRAPH": False,
+    }.items():
+        setattr(options, name, value)
+
+    with (
+        mock.patch.object(parse_cj_logs, "op", options, create=True),
+        mock.patch.object(parse_cj_logs, "load_tx_database_from_btccore", return_value={}),
+        mock.patch.object(parse_cj_logs, "obtain_wallets_info", return_value=({}, {})),
+        mock.patch.object(parse_cj_logs, "joinmarket_parse_round_events", return_value=({}, {})),
+        mock.patch.object(parse_cj_logs, "parse_wasabi_coordinator_coinjoins") as parse_wasabi,
+        mock.patch.object(parse_cj_logs, "parse_coinjoin_errors") as parse_wasabi_errors,
+        mock.patch.object(parse_cj_logs, "load_prison_data"),
+        mock.patch.object(parse_cj_logs, "load_anonscore_data"),
+        mock.patch.object(parse_cj_logs.als, "remove_link_between_inputs_and_outputs"),
+        mock.patch.object(parse_cj_logs.als, "compute_link_between_inputs_and_outputs"),
+        mock.patch.object(parse_cj_logs.als, "analyze_input_out_liquidity"),
+    ):
+        result = parse_cj_logs.process_experiment((str(tmp_path), False))
+
+    assert result["coinjoins"] == {}
+    assert result["rounds"] == {}
+    parse_wasabi.assert_not_called()
+    parse_wasabi_errors.assert_not_called()
+    assert "Wasabi coordinator" not in caplog.text
 
 
 def test_joinmarket_round_events_parse_matched_txid(tmp_path):
