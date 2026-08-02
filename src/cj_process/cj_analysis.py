@@ -957,7 +957,7 @@ def joinmarket_find_coinjoins(filename):
             lines = file.readlines()
             line_index = 0
             while line_index < len(lines):
-                regex_pattern = "(?P<timestamp>.*) \[INFO\]  obtained tx"
+                regex_pattern = r"(?P<timestamp>.*) \[INFO\]  obtained tx"
                 match = re.search(regex_pattern, lines[line_index])
                 line_index = line_index + 1
                 if match is None:
@@ -973,7 +973,7 @@ def joinmarket_find_coinjoins(filename):
                     cjtx_json = json.loads("".join(cjtx_lines))
                     # read next line to extract timestamp
                     line_index = line_index + 1
-                    regex_pattern = "(?P<timestamp>.*) \[INFO\]"
+                    regex_pattern = r"(?P<timestamp>.*) \[INFO\]"
                     match = re.search(regex_pattern, lines[line_index])
                     # Extract timestamp, replace , by . before fraction of seconds
                     cjtx_json['timestamp'] = match.group('timestamp').strip().replace(',', '.')
