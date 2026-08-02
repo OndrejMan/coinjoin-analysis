@@ -55,6 +55,14 @@ PRE_2_0_4_VERSION = False
 MAX_NUM_DISPLAY_UTXO = 1000
 GLOBAL_IMG_SUFFIX = '.3'
 PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION = '1.0'
+WASABI_SUCCESSFUL_BROADCAST_RE = re.compile(
+    r"successfully\s+broadcast(?:ed)?\s+(?:the\s+)?coinjoin(?:\s+transaction)?:\s*([0-9a-f]{64})",
+    re.IGNORECASE,
+)
+WASABI_ROUND_ACTIVITY_RE = re.compile(
+    r"\b(?:Blame\s+)?Round\s+\([^)]+\):\s+(?:Created round|Blame round created)\b",
+    re.IGNORECASE,
+)
 
 
 # colors used for different wallet clusters. Avoid following colors : 'red' (used for cjtx)
@@ -2028,7 +2036,7 @@ def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}):
     regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Blame Round \((?P<round_id>.*)\): Blame round created from round '(?P<orig_round_id>.*)'?"
     start_blame_rounds_id = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp'])
     # 2023-10-07 11:04:56.723 [43] INFO	Arena.StepTransactionSigningPhaseAsync (374)	Round (dee277ed8fd5d1af24bf09126818b3cec362f52f9fc4323474c2ec5075454d1a): Successfully broadcast the coinjoin: 345386611e7a4543524a3c7fa27f14d511fbb70b1b8786d777b19fb265e95558.
-    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]*)\.?"
+    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast(?:ed)? (?:the )?coinjoin(?: transaction)?: (?P<cj_tx_id>[0-9a-f]{64})\.?"
     success_coinjoin_round_ids = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp', 'cj_tx_id'])
     # round_cjtx_mapping = find_round_cjtx_mapping(coord_input_file, regex_pattern, 'round_id', 'cj_tx_id')
     round_cjtx_mapping = {round_id: success_coinjoin_round_ids[round_id][0]['cj_tx_id'] for round_id in     # take only the first record found
@@ -2095,7 +2103,7 @@ def parse_coinjoin_errors(cjtx_stats, coord_input_file):
     # Round-dependent information
     #
     # Round id to coinjoin txid mapping
-    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]*)\.?"
+    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast(?:ed)? (?:the )?coinjoin(?: transaction)?: (?P<cj_tx_id>[0-9a-f]{64})\.?"
     success_coinjoin_round_ids = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp', 'cj_tx_id'])
     als.insert_type(success_coinjoin_round_ids, CJ_LOG_TYPES.COINJOIN_BROADCASTED)
     als.insert_by_round_id(rounds_logs, success_coinjoin_round_ids)
@@ -2725,6 +2733,96 @@ def optimize_txvalue_info(cjtx_stats):
     return optimized
 
 
+def parse_wasabi_coordinator_coinjoins(base_path, raw_txs):
+    """Parse integrity-checked Wasabi CoinJoins and return logs with completed rounds.
+
+    Current runs must have a complete, hash-verified producer manifest whose
+    positive count matches the log and parser output. Runs from older emulator
+    versions remain supported without a manifest, but their logs must be valid
+    UTF-8 and contain recognizable Wasabi round activity.
+    """
+    data_path = os.path.join(base_path, 'data')
+    verified_manifest = verify_wasabi_manifest_log_files(data_path, reject_other_engine=True)
+    if verified_manifest is None:
+        coordinator_log_files = find_legacy_wasabi_coordinator_log_files(base_path)
+        expected_positive_count = None
+    else:
+        coordinator_log_files, expected_positive_count = verified_manifest
+
+    if not coordinator_log_files:
+        raise FileNotFoundError(
+            'No Wasabi coordinator log file found in the producer label manifest, '
+            'local WalletWasabi data, or exported emulator data.'
+        )
+
+    producer_positive_txids = set()
+    for coordinator_log_file in coordinator_log_files:
+        try:
+            with open(coordinator_log_file, 'r', encoding='utf-8') as log_file:
+                log_text = log_file.read()
+        except (OSError, UnicodeError) as error:
+            raise ValueError(f'Cannot read Wasabi coordinator log {coordinator_log_file}: {error}') from error
+
+        log_positive_txids = {
+            match.group(1).lower()
+            for match in WASABI_SUCCESSFUL_BROADCAST_RE.finditer(log_text)
+        }
+        if verified_manifest is None and not log_positive_txids and WASABI_ROUND_ACTIVITY_RE.search(log_text) is None:
+            raise ValueError(
+                'Legacy Wasabi coordinator log contains no recognizable round activity: '
+                f'{coordinator_log_file}'
+            )
+        producer_positive_txids.update(log_positive_txids)
+
+    if (
+        expected_positive_count is not None
+        and len(producer_positive_txids) != expected_positive_count
+    ):
+        raise ValueError(
+            'Wasabi producer positive count does not match coordinator logs: '
+            f'parsed {len(producer_positive_txids)}, expected {expected_positive_count}'
+        )
+
+    coinjoins = {}
+    complete_round_logs = []
+    incomplete_round_logs = []
+
+    for coordinator_log_file in coordinator_log_files:
+        parsed_coinjoins = parse_backend_coinjoin_logs(coordinator_log_file, raw_txs)
+        if parsed_coinjoins:
+            coinjoins.update(parsed_coinjoins)
+            complete_round_logs.append(coordinator_log_file)
+        else:
+            incomplete_round_logs.append(coordinator_log_file)
+
+    parsed_positive_txids = {str(txid).lower() for txid in coinjoins}
+    if parsed_positive_txids != producer_positive_txids:
+        missing_txids = sorted(producer_positive_txids - parsed_positive_txids)
+        unexpected_txids = sorted(parsed_positive_txids - producer_positive_txids)
+        raise ValueError(
+            'Wasabi coordinator labels do not match parsed CoinJoins: '
+            f'missing={missing_txids}, unexpected={unexpected_txids}'
+        )
+
+    if coinjoins:
+        if len(complete_round_logs) > 1:
+            logging.warning(
+                'Merged complete Wasabi coinjoins from multiple coordinator logs: %s',
+                ', '.join(complete_round_logs),
+            )
+        return coinjoins, complete_round_logs
+
+    if incomplete_round_logs:
+        parsed_files = '\n  '.join(incomplete_round_logs)
+        logging.warning(
+            'No complete Wasabi coinjoin transactions were found in coordinator logs. '
+            f'Parsed files:\n  {parsed_files}'
+        )
+        return {}, []
+
+    raise AssertionError('Wasabi coordinator logs were validated but not processed')
+
+
 def process_experiment(args):
     mix_protocol = MIX_PROTOCOL.WASABI2
     base_path = args[0]
@@ -2762,14 +2860,16 @@ def process_experiment(args):
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
         # Parse conjoins from logs
-        # Case 1: Local or exported Wasabi coordinator logs
-        coordinator_log_files = find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR)
-        for coordinator_log_file in coordinator_log_files:
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coordinator_log_file, RAW_TXS_DB)
-        # Case 2: Docker with joinmarket client
+        coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+        else:
+            cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB
+            )
+            if not coinjoin_log_files:
+                cjtx_stats['rounds'] = {'no_round': []}
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
@@ -2779,9 +2879,16 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
-            for coordinator_log_file in coordinator_log_files:
-                parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
+        if not os.path.exists(joinmarket_input_path):
+            if op.PARSE_ERRORS and coinjoin_log_files:
+                for coinjoin_log_file in coinjoin_log_files:
+                    parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
+            elif op.PARSE_ERRORS:
+                if 'rounds' not in cjtx_stats:
+                    cjtx_stats['rounds'] = {'no_round': []}
+                logging.info(
+                    'Skipping Wasabi coordinator error parsing; no completed CoinJoin rounds were found.'
+                )
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:
