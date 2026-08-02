@@ -2602,9 +2602,11 @@ def process_experiment(args):
         if os.path.exists(coord_input_file):
             cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coord_input_file, RAW_TXS_DB)
         # Case 3: Docker with joinmarket client
-        coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
-        if os.path.exists(coord_input_file):
+        joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
+        if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+            # Wasabi error parsing is skipped below, but the analysis still reads the rounds.
+            cjtx_stats['rounds'] = {'no_round': []}
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
@@ -2614,7 +2616,7 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS:
+        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
             coord_input_file = find_wasabi_coordinator_log_file(WASABIWALLET_DATA_DIR)
             parse_coinjoin_errors(cjtx_stats, coord_input_file)
 
