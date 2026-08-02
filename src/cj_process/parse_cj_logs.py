@@ -48,7 +48,7 @@ import cj_process.cj_visualize as cjvis
 
 # Configure the logging module
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger_to_disable = logging.getLogger("mathplotlib")
+logger_to_disable = logging.getLogger("matplotlib")
 logger_to_disable.setLevel(logging.WARNING)
 
 BTC_CLI_PATH = os.environ.get('BITCOIN_CLI_PATH', 'bitcoin-cli')
