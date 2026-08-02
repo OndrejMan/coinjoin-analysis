@@ -11,7 +11,11 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
-from cj_process.joinmarket_client import joinmarket_parse_coinjoin_logs
+from cj_process.joinmarket_client import (
+    find_joinmarket_round_events_file,
+    joinmarket_parse_coinjoin_logs,
+    joinmarket_parse_round_events,
+)
 # Re-exported so process_experiment and tests keep addressing them on this module.
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_files,
@@ -69,6 +73,25 @@ LINE_STYLES = ['-', '--', '-.', ':']
 
 SM = SummaryMessages()
 als.SM = SM
+
+
+def format_mine_time(mine_time):
+    if isinstance(mine_time, (int, float)):
+        datetime_obj = datetime.fromtimestamp(mine_time, tz=UTC)
+    elif isinstance(mine_time, str):
+        normalized_time = mine_time.strip()
+        if normalized_time.endswith('Z'):
+            normalized_time = normalized_time[:-1] + '+00:00'
+        try:
+            datetime_obj = datetime.fromisoformat(normalized_time)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported mine_time value: {mine_time!r}") from exc
+        if datetime_obj.tzinfo is not None:
+            datetime_obj = datetime_obj.astimezone(UTC)
+    else:
+        raise TypeError(f"Unsupported mine_time type: {type(mine_time).__name__}")
+
+    return datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
 def float_equals(a, b, tolerance=1e-9):

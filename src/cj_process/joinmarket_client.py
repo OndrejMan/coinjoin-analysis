@@ -1,15 +1,33 @@
-"""Parse the JoinMarket client logs of a run into CoinJoin records.
+"""Locate the JoinMarket artifacts of a run and parse the CoinJoins they describe.
 
-``parse_cj_logs`` is imported lazily inside the function that needs it: it
-imports this module at module level, and the references (extract_tx_info, SM)
-must be resolved at call time so tests can patch ``parse_cj_logs`` attributes.
+Two sources are supported. Older emulator runs copy the jcs-*/joinmarket client
+logs, which are parsed for successful CoinJoins; newer runs may omit them and
+instead ship data/joinmarket_round_events.json, where the emulator already
+matched each round to a txid.
+
+``parse_cj_logs`` is imported lazily inside the functions that need it: it
+imports this module at module level, and the references (extract_tx_info,
+format_mine_time, SM) must be resolved at call time so tests can patch
+``parse_cj_logs`` attributes.
 """
+import json
 import logging
 import os
 
 import cj_process.cj_analysis as als
 
 logger = logging.getLogger(__name__)
+
+
+def find_joinmarket_round_events_file(base_path: str):
+    candidate_paths = [
+        os.path.join(base_path, 'data', 'joinmarket_round_events.json'),
+        os.path.join(base_path, 'joinmarket_round_events.json'),
+    ]
+    for candidate_path in candidate_paths:
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return None
 
 
 def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
@@ -66,3 +84,84 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     parse_cj_logs.SM.print(f'Total fully finished JoinMarket coinjoins processed: {len(cjtx_stats)}')
 
     return cjtx_stats
+
+
+def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict):
+    """
+    Obtain JoinMarket coinjoins from emulator-provided round labels.
+    Newer emulator runs may not contain copied jcs-*/joinmarket client logs, but
+    they do contain data/joinmarket_round_events.json with matched txids.
+    """
+    # Resolved at call time so tests can patch ``parse_cj_logs`` attributes; see module docstring.
+    from cj_process import parse_cj_logs
+
+    events_file = find_joinmarket_round_events_file(base_path)
+    if events_file is None:
+        return None
+
+    print(f'Parsing CoinJoin-relevant data from JoinMarket round events {events_file}...', end='')
+    with open(events_file, 'r') as file:
+        round_events = json.load(file)
+
+    cjtx_stats = {}
+    parsed_rounds = {}
+    dropped_decode_failures = 0
+    dropped_missing_txids = 0
+    missing_time_txids = []
+    for event in round_events:
+        txid = event.get('txid')
+        event_round_id = event.get('round_id')
+        round_id = str(event_round_id if event_round_id is not None else txid or len(parsed_rounds) + 1)
+        if not txid:
+            dropped_missing_txids += 1
+            continue
+
+        if txid not in raw_tx_db:
+            dropped_decode_failures += 1
+            logger.warning('Dropping JoinMarket round event for tx=%s missing from exported blocks', txid)
+            continue
+
+        timestamp = (
+            event.get('broadcast_time')
+            or event.get('timestamp')
+            or event.get('round_start_time')
+            or raw_tx_db[txid].get('mine_time')
+        )
+        if not timestamp:
+            missing_time_txids.append(txid)
+            continue
+        try:
+            timestamp = parse_cj_logs.format_mine_time(timestamp)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'JoinMarket round event has invalid timestamp for txid {txid}: {timestamp!r}') from exc
+
+        tx_record = parse_cj_logs.extract_tx_info(txid, raw_tx_db, allow_rpc=False)
+        if tx_record is not None:
+            tx_record['round_id'] = round_id
+            tx_record['round_start_time'] = timestamp
+            tx_record['broadcast_time'] = timestamp
+            tx_record['is_blame_round'] = False
+            tx_record['is_cjtx'] = True
+            tx_record['joinmarket_round_event'] = event
+            cjtx_stats[txid] = tx_record
+            parsed_rounds[round_id] = {'round_start_timestamp': timestamp}
+        else:
+            dropped_decode_failures += 1
+            logger.warning('Dropping JoinMarket round event with undecodable tx=%s', txid)
+        print('.', end='')
+    print('done')
+
+    if missing_time_txids:
+        missing_time_txids_text = ', '.join(str(txid) for txid in missing_time_txids)
+        raise ValueError(
+            f'JoinMarket round events missing broadcast/mine time for txids: {missing_time_txids_text}'
+        )
+    parse_cj_logs.SM.print(f'Total JoinMarket round events loaded: {len(round_events)}')
+    parse_cj_logs.SM.print(
+        'JoinMarket round events dropped: '
+        f'missing_txid={dropped_missing_txids}, decode_failures={dropped_decode_failures}'
+    )
+    parse_cj_logs.SM.print(
+        f'Total fully finished JoinMarket coinjoins processed from round events: {len(cjtx_stats)}'
+    )
+    return cjtx_stats, parsed_rounds

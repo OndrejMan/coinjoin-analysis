@@ -194,6 +194,13 @@ docker compose run --rm emulation-process
 
 Set `CJ_RUNS` to mount a different host-side `runs/` directory.
 
+JoinMarket emulator runs may provide round labels in
+`data/joinmarket_round_events.json`. Each accepted event needs a `txid` and a
+timestamp (`broadcast_time`, `timestamp`, or `round_start_time`; the
+transaction's `mine_time` is a fallback). The referenced transaction and its
+inputs must be present in the exported raw transaction database, so this path
+never queries a live Bitcoin node.
+
 The extraction process creates the following files: 
   * ```coinjoin_tx_info.json``` ... basic information about all detected coinjoins, mapping of all wallets to their coins, started rounds, etc.. Used for subsequent analysis.
   * ```wallets_coins.json``` ... information about every output created during execution, mapped to its coinjoin.
