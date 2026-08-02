@@ -214,7 +214,9 @@ def get_outputs_leaving_mix(coinjoins_dupl, sorted_cjs_in_scope, root_tx_id):
             output['vout'] = output_index
             if 'wallet_name' in output and output['wallet_name'] in wallets_involved:  # Analyze only wallets which are having some input in the root transaction
                 # Nobody spent this utxo or its anon score already reached the mixing limit (artificial leave of mix for testing)
-                if 'spend_by_txid' not in output.keys() or output['anon_score'] > FORCE_LIMIT_ANON_SCORE:
+                anon_score = output.get('anon_score')
+                if 'spend_by_txid' not in output.keys() or (
+                        anon_score is not None and anon_score > FORCE_LIMIT_ANON_SCORE):
                     # This output is not spent in any of the subsequent mixing transactions
                     wallet_leave_txs[output['wallet_name']].append((cjtx_id, output))
                 else:
@@ -365,7 +367,9 @@ def compute_inputs_leave_distribution(coinjoins_dupl, sorted_cjs_in_scope, root_
         for output in coinjoins_dupl[cjtx_id]['outputs'].values():
             if 'wallet_name' in output and output['wallet_name'] in wallets_involved:  # Analyze only wallets which are having some input in the root transaction
                 # Nobody spent this utxo or its anon score already reached the mixing limit (artificial leave of mix for testing)
-                if 'spend_by_txid' not in output.keys() or output['anon_score'] > FORCE_LIMIT_ANON_SCORE:
+                anon_score = output.get('anon_score')
+                if 'spend_by_txid' not in output.keys() or (
+                        anon_score is not None and anon_score > FORCE_LIMIT_ANON_SCORE):
                     # This output is not spent in any of the subsequent mixing transactions
                     wallet_leave_txs[output['wallet_name']].append(cjtx_id)
                 else:
