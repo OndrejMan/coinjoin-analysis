@@ -2,6 +2,7 @@ import json
 from unittest import mock
 
 from cj_process.parse_cj_logs import (
+    find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
     joinmarket_parse_round_events,
 )
@@ -107,6 +108,12 @@ def test_dropped_joinmarket_events_do_not_create_rounds(tmp_path):
     assert coinjoins == {}
     assert rounds == {}
     run_command.assert_not_called()
+
+
+def test_empty_joinmarket_log_directory_is_not_usable(tmp_path):
+    (tmp_path / 'data' / 'jcs-000' / 'joinmarket').mkdir(parents=True)
+
+    assert find_joinmarket_client_log_files(str(tmp_path)) == []
 
 
 def test_joinmarket_event_timestamp_is_normalized(tmp_path):

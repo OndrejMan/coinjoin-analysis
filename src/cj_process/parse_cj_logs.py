@@ -12,6 +12,7 @@ import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
 from cj_process.joinmarket_client import (
+    find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
     joinmarket_parse_coinjoin_logs,
     joinmarket_parse_round_events,
@@ -2625,10 +2626,19 @@ def process_experiment(args):
         # Parse conjoins from logs
         coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
-        if os.path.exists(joinmarket_input_path):
+        joinmarket_log_files = find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
+        joinmarket_round_events_file = find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
+        if joinmarket_log_files:
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
             )
+            if not cjtx_stats['coinjoins'] and joinmarket_round_events_file:
+                logging.info('JoinMarket client logs contained no coinjoins; using round-event labels instead.')
+                cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+            if 'rounds' not in cjtx_stats:
+                cjtx_stats['rounds'] = {'no_round': []}
+        elif joinmarket_round_events_file:
+            cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
         else:
             cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc

@@ -10,6 +10,7 @@ imports this module at module level, and the references (extract_tx_info,
 format_mine_time, SM) must be resolved at call time so tests can patch
 ``parse_cj_logs`` attributes.
 """
+import glob
 import json
 import logging
 import os
@@ -25,9 +26,14 @@ def find_joinmarket_round_events_file(base_path: str):
         os.path.join(base_path, 'joinmarket_round_events.json'),
     ]
     for candidate_path in candidate_paths:
-        if os.path.exists(candidate_path):
+        if os.path.isfile(candidate_path):
             return candidate_path
     return None
+
+
+def find_joinmarket_client_log_files(base_path: str):
+    pattern = os.path.join(base_path, 'data', 'jcs-*', 'joinmarket', 'jmwalletd.log')
+    return sorted(path for path in glob.glob(pattern) if os.path.isfile(path))
 
 
 def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
@@ -44,18 +50,9 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     # 1. Parse logs for each client separately
     # 2. Collate client logs into complete view
 
-    clients_paths = []
-    exp_base_path = os.path.join(base_path, 'data')
-    files = os.listdir(exp_base_path) if os.path.exists(exp_base_path) else logging.error(f'Path {exp_base_path} does not exist')
-    for file in files:
-        target_exp_base_path = os.path.join(exp_base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if os.path.exists(os.path.join(target_exp_base_path, 'joinmarket')):
-                clients_paths.append(target_exp_base_path)
-
     success_coinjoins = {}
-    for client_path in clients_paths:
-        success_coinjoins[client_path] = als.joinmarket_find_coinjoins(os.path.join(client_path, 'joinmarket', 'jmwalletd.log'))
+    for log_file in find_joinmarket_client_log_files(base_path):
+        success_coinjoins[log_file] = als.joinmarket_find_coinjoins(log_file)
 
     all_coinjoins_duplicities = [success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()]
     all_coinjoins = {txid: success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()}

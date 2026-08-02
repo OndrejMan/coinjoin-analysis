@@ -201,6 +201,11 @@ transaction's `mine_time` is a fallback). The referenced transaction and its
 inputs must be present in the exported raw transaction database, so this path
 never queries a live Bitcoin node.
 
+Usable `data/jcs-*/joinmarket/jmwalletd.log` client logs take precedence. If
+they are absent or contain no detected CoinJoins, extraction falls back to the
+round-event file; `joinmarket_round_events.json` directly under the experiment
+directory is accepted as well.
+
 The extraction process creates the following files: 
   * ```coinjoin_tx_info.json``` ... basic information about all detected coinjoins, mapping of all wallets to their coins, started rounds, etc.. Used for subsequent analysis.
   * ```wallets_coins.json``` ... information about every output created during execution, mapped to its coinjoin.
