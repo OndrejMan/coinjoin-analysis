@@ -2589,6 +2589,10 @@ def process_experiment(args):
     base_path = args[0]
     save_figs = args[1]
     WASABIWALLET_DATA_DIR = base_path
+    is_joinmarket = bool(
+        find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
+        or find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
+    )
     SM.print(f'INPUT PATH: {base_path}')
     save_file = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info.json")
     save_file_stats = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info_stats.json")
@@ -2625,7 +2629,6 @@ def process_experiment(args):
 
         # Parse conjoins from logs
         coinjoin_log_files = []
-        joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         joinmarket_log_files = find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
         joinmarket_round_events_file = find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
         if joinmarket_log_files:
@@ -2654,7 +2657,7 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if not os.path.exists(joinmarket_input_path):
+        if not is_joinmarket:
             if op.PARSE_ERRORS and coinjoin_log_files:
                 for coinjoin_log_file in coinjoin_log_files:
                     parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
@@ -2714,7 +2717,8 @@ def process_experiment(args):
     #parse_client_coinjoin_logs(cjtx_stats, client_input_path)
     # TODO: load client logs from multiple directories 'wasabi-client-x'
 
-    load_prison_data(cjtx_stats, WASABIWALLET_DATA_DIR)
+    if not is_joinmarket:
+        load_prison_data(cjtx_stats, WASABIWALLET_DATA_DIR)
 
     load_anonscore_data(cjtx_stats, WASABIWALLET_DATA_DIR)
 
