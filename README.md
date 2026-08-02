@@ -20,6 +20,15 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
+### Wallet Wasabi data directory (optional)
+
+Set `WASABI_WALLET_DATA_DIR` to the Wallet Wasabi data directory when the RPC
+helpers should load `Client/Config.json` from that installation:
+
+```
+export WASABI_WALLET_DATA_DIR=/path/to/WalletWasabi
+```
+
 ### Bitcoin Core CLI (optional)
 
 The raw-transaction decoding workflow invokes `bitcoin-cli` from `PATH` by
