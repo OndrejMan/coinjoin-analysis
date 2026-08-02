@@ -303,7 +303,7 @@ def print_round_logs(filename, round_id):
     print('**************************************')
 
 
-def get_input_address(txid, txid_in_out, raw_txs: dict = {}):
+def get_input_address(txid, txid_in_out, raw_txs: dict = {}, allow_rpc: bool = True):
     """
     Returns address which was used in transaction given by 'txid' as 'txid_in_out' output index
     :param txid: transaction id to read input address from
@@ -314,10 +314,14 @@ def get_input_address(txid, txid_in_out, raw_txs: dict = {}):
 
     if len(raw_txs) > 0 and txid in raw_txs.keys():
         tx_info = raw_txs[txid]
-    else:
+    elif allow_rpc:
         result = als.run_command(
             '{} -regtest getrawtransaction {} true'.format(BTC_CLI_PATH, txid), False)
+        if result.returncode != 0:
+            return None, None
         tx_info = json.loads(result.stdout)
+    else:
+        return None, None
 
     try:
         parsed_data = tx_info
@@ -332,7 +336,7 @@ def get_input_address(txid, txid_in_out, raw_txs: dict = {}):
     return None, None
 
 
-def extract_tx_info(txid: str, raw_txs: dict):
+def extract_tx_info(txid: str, raw_txs: dict, allow_rpc: bool | None = None):
     """
     Extract input and output addresses
     :param txid: transaction to parse
@@ -340,12 +344,15 @@ def extract_tx_info(txid: str, raw_txs: dict):
     :return: parsed transaction record
     """
 
+    if allow_rpc is None:
+        allow_rpc = not raw_txs
+
     USE_PRELOADED = True if len(raw_txs) > 0 and txid in raw_txs.keys() else False
 
     if USE_PRELOADED:
         # Use pre-loaded transactions if available
         tx_info = raw_txs[txid]
-    else:
+    elif allow_rpc:
         # retrieve from fullnode via RPC
         result = als.run_command(
             '{} -regtest getrawtransaction {} true'.format(BTC_CLI_PATH, txid), False)
@@ -353,6 +360,9 @@ def extract_tx_info(txid: str, raw_txs: dict):
             print(f'Cannot retrieve tx info for {txid} with {result.stderr} error')
             return None
         tx_info = json.loads(result.stdout)
+    else:
+        logging.warning('Transaction %s is missing from the exported transaction database', txid)
+        return None
 
     tx_record = {}
     input_addresses = {}
@@ -371,7 +381,16 @@ def extract_tx_info(txid: str, raw_txs: dict):
         index = 0
         for input in inputs:
             # we need to read and parse previous transaction to obtain address and other information
-            in_address, in_full_info = get_input_address(input['txid'], input['vout'], raw_txs)
+            in_address, in_full_info = get_input_address(
+                input['txid'], input['vout'], raw_txs, allow_rpc=allow_rpc
+            )
+            if in_full_info is None:
+                logging.warning(
+                    'Input transaction %s referenced by %s is missing from the exported transaction database',
+                    input['txid'],
+                    txid,
+                )
+                return None
 
             tx_record['inputs'][index] = {}
             # tx_record['inputs'][index]['full_info'] = in_full_info
@@ -1974,7 +1993,7 @@ def build_address_wallet_mapping(cjtx_stats):
     return address_wallet_mapping
 
 
-def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}):
+def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
     """
     Obtain information about coinjoins from collated logs from all separate clients
     :param base_path: base path where docker client images are stored
@@ -2007,7 +2026,7 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}):
     cjtx_stats = {}
     for cjtxid in all_coinjoins.keys():
         # extract input and output addresses
-        tx_record = extract_tx_info(cjtxid, raw_tx_db)
+        tx_record = extract_tx_info(cjtxid, raw_tx_db, allow_rpc=allow_rpc)
         if tx_record is not None:
             tx_record['round_id'] = cjtxid
             tx_record['round_start_time'] = all_coinjoins[cjtxid]['timestamp']  # BUGBUG: bad round start time, needs to be extracted from logs better
@@ -2025,7 +2044,7 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}):
     return cjtx_stats
 
 
-def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}):
+def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}, allow_rpc: bool = True):
     print('Parsing coinjoin-relevant data from coordinator logs {}...'.format(coord_input_file), end='')
     if PRE_2_0_4_VERSION:
         regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Created round with params: MaxSuggestedAmount:'([0-9\.]+)' BTC?"
@@ -2061,7 +2080,9 @@ def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}):
     cjtx_stats = {}
     for round_id in full_round_ids:
         # extract input and output addresses
-        tx_record = extract_tx_info(round_cjtx_mapping[round_id], raw_tx_db)
+        tx_record = extract_tx_info(
+            round_cjtx_mapping[round_id], raw_tx_db, allow_rpc=allow_rpc
+        )
         if tx_record is not None:
             # Find coinjoin transaction id and create record if not already
             cjtxid = round_cjtx_mapping[round_id]
@@ -2733,7 +2754,7 @@ def optimize_txvalue_info(cjtx_stats):
     return optimized
 
 
-def parse_wasabi_coordinator_coinjoins(base_path, raw_txs):
+def parse_wasabi_coordinator_coinjoins(base_path, raw_txs, allow_rpc: bool = True):
     """Parse integrity-checked Wasabi CoinJoins and return logs with completed rounds.
 
     Current runs must have a complete, hash-verified producer manifest whose
@@ -2788,7 +2809,9 @@ def parse_wasabi_coordinator_coinjoins(base_path, raw_txs):
     incomplete_round_logs = []
 
     for coordinator_log_file in coordinator_log_files:
-        parsed_coinjoins = parse_backend_coinjoin_logs(coordinator_log_file, raw_txs)
+        parsed_coinjoins = parse_backend_coinjoin_logs(
+            coordinator_log_file, raw_txs, allow_rpc=allow_rpc
+        )
         if parsed_coinjoins:
             coinjoins.update(parsed_coinjoins)
             complete_round_logs.append(coordinator_log_file)
@@ -2844,6 +2867,7 @@ def process_experiment(args):
                     file.write(json.dumps(dict(sorted(cjtx_stats.items())), indent=4))
     else:
         # Load transaction info from serialized files
+        RAW_TXS_DB = {}
         if op.LOAD_TXINFO_FROM_DOCKER_FILES:
             # Load tx from logs stored by Bitcoin fullnode - all transactions available
             tx_path = os.path.join(base_path, 'data', 'btc-node')
@@ -2854,6 +2878,8 @@ def process_experiment(args):
             # tx_path = os.path.join(base_path, 'data', 'wasabi-backend', 'WabiSabi', 'CoinJoinTransactions')
             # RAW_TXS_DB = load_rawtx_database(tx_path)
 
+        allow_rpc = not op.LOAD_TXINFO_FROM_DOCKER_FILES
+
         # Load wallets info
         cjtx_stats = {}
         cjtx_stats['wallets_info'], cjtx_stats['wallets_coins'] = (
@@ -2863,10 +2889,12 @@ def process_experiment(args):
         coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         if os.path.exists(joinmarket_input_path):
-            cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+            cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
+            )
         else:
             cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
-                WASABIWALLET_DATA_DIR, RAW_TXS_DB
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
             )
             if not coinjoin_log_files:
                 cjtx_stats['rounds'] = {'no_round': []}
