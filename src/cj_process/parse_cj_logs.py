@@ -1,5 +1,6 @@
 import ast
 import csv
+import hashlib
 import math
 import random
 import re
@@ -53,6 +54,7 @@ SATS_IN_BTC = 100000000
 PRE_2_0_4_VERSION = False
 MAX_NUM_DISPLAY_UTXO = 1000
 GLOBAL_IMG_SUFFIX = '.3'
+PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION = '1.0'
 
 
 # colors used for different wallet clusters. Avoid following colors : 'red' (used for cjtx)
@@ -76,6 +78,95 @@ def longest_common_prefix(paths):
     prefix = os.path.commonprefix(paths)
     # Ensure prefix aligns with a directory boundary
     return prefix if prefix.endswith(os.sep) else os.path.dirname(prefix)
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as source_file:
+        for chunk in iter(lambda: source_file.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_wasabi_manifest_log_files(data_path, reject_other_engine=False):
+    """Return verified manifest logs and producer count, or None for legacy runs."""
+    manifest_path = os.path.join(data_path, 'coinjoin_label_manifest.json')
+    if not os.path.isfile(manifest_path):
+        return None
+
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as manifest_file:
+            manifest = json.load(manifest_file)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f'Cannot read producer label manifest {manifest_path}: {error}') from error
+
+    if not isinstance(manifest, dict):
+        raise ValueError(f'Producer label manifest must contain a JSON object: {manifest_path}')
+
+    if manifest.get('schema_version') != PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION:
+        raise ValueError(
+            f'Unsupported producer label manifest schema version in {manifest_path}: '
+            f'{manifest.get("schema_version")!r}'
+        )
+
+    if manifest.get('engine') != 'wasabi':
+        if reject_other_engine:
+            raise ValueError(f'Producer label manifest engine is not Wasabi: {manifest_path}')
+        return None
+
+    if manifest.get('complete') is not True:
+        reason = manifest.get('reason') or 'producer-label capture was incomplete'
+        raise ValueError(f'Wasabi producer label manifest is incomplete: {reason}')
+
+    positive_count = manifest.get('positive_count')
+    if isinstance(positive_count, bool) or not isinstance(positive_count, int) or positive_count < 0:
+        raise ValueError(f'Wasabi producer label manifest has invalid positive_count: {positive_count!r}')
+
+    sources = manifest.get('sources')
+    if not isinstance(sources, list) or not sources:
+        raise ValueError('Complete Wasabi producer label manifest has no sources')
+
+    data_root = os.path.realpath(data_path)
+    log_files = []
+    seen_paths = set()
+    for source in sources:
+        relative_path = source.get('path') if isinstance(source, dict) else None
+        if not isinstance(relative_path, str) or not relative_path:
+            raise ValueError('Wasabi producer label manifest contains an invalid source path')
+        source_path = os.path.realpath(os.path.join(data_root, relative_path))
+        if os.path.commonpath((data_root, source_path)) != data_root:
+            raise ValueError(f'Wasabi producer label source escapes the data directory: {relative_path}')
+        if os.path.basename(source_path) != 'Logs.txt':
+            raise ValueError(f'Wasabi producer label manifest contains an unexpected source: {relative_path}')
+        if source_path in seen_paths:
+            raise ValueError(f'Wasabi producer label manifest contains a duplicate source: {relative_path}')
+        if not os.path.isfile(source_path):
+            raise ValueError(f'Wasabi producer label source is missing: {relative_path}')
+
+        expected_size = source.get('size_bytes')
+        expected_sha256 = source.get('sha256')
+        if (
+            isinstance(expected_size, bool)
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+            or not isinstance(expected_sha256, str)
+            or re.fullmatch(r'[0-9a-f]{64}', expected_sha256) is None
+        ):
+            raise ValueError(f'Wasabi producer label source metadata is invalid: {relative_path}')
+        if os.path.getsize(source_path) != expected_size:
+            raise ValueError(f'Wasabi producer label source size does not match manifest: {relative_path}')
+        if sha256_file(source_path) != expected_sha256:
+            raise ValueError(f'Wasabi producer label source hash does not match manifest: {relative_path}')
+
+        seen_paths.add(source_path)
+        log_files.append(source_path)
+
+    return log_files, positive_count
+
+
+def find_wasabi_manifest_log_files(data_path):
+    verified_manifest = verify_wasabi_manifest_log_files(data_path)
+    return verified_manifest[0] if verified_manifest is not None else []
 
 
 def find_wasabi_exported_log_files(data_path):
@@ -103,13 +194,22 @@ def find_wasabi_exported_log_files(data_path):
     return []
 
 
-def find_wasabi_coordinator_log_files(base_path):
+def find_legacy_wasabi_coordinator_log_files(base_path):
     local_log_file = os.path.join(base_path, 'WalletWasabi', 'Backend', 'Logs.txt')
     if os.path.isfile(local_log_file):
         return [local_log_file]
 
     data_path = os.path.join(base_path, 'data')
     return find_wasabi_exported_log_files(data_path)
+
+
+def find_wasabi_coordinator_log_files(base_path):
+    data_path = os.path.join(base_path, 'data')
+    # A present Wasabi manifest is authoritative. Only runs without one use legacy discovery.
+    verified_manifest = verify_wasabi_manifest_log_files(data_path)
+    if verified_manifest is not None:
+        return verified_manifest[0]
+    return find_legacy_wasabi_coordinator_log_files(base_path)
 
 
 def find_wasabi_prison_file(base_path):
