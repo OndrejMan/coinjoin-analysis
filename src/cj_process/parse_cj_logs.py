@@ -75,6 +75,25 @@ SM = SummaryMessages()
 als.SM = SM
 
 
+def format_mine_time(mine_time):
+    if isinstance(mine_time, (int, float)):
+        datetime_obj = datetime.fromtimestamp(mine_time, tz=UTC)
+    elif isinstance(mine_time, str):
+        normalized_time = mine_time.strip()
+        if normalized_time.endswith('Z'):
+            normalized_time = normalized_time[:-1] + '+00:00'
+        try:
+            datetime_obj = datetime.fromisoformat(normalized_time)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported mine_time value: {mine_time!r}") from exc
+        if datetime_obj.tzinfo is not None:
+            datetime_obj = datetime_obj.astimezone(UTC)
+    else:
+        raise TypeError(f"Unsupported mine_time type: {type(mine_time).__name__}")
+
+    return datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
 def float_equals(a, b, tolerance=1e-9):
     return abs(a - b) < tolerance
 
@@ -2042,6 +2061,96 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     SM.print('Total fully finished coinjoins processed: {}'.format(len(cjtx_stats.keys())))
 
     return cjtx_stats
+
+
+def find_joinmarket_round_events_file(base_path: str):
+    candidate_paths = [
+        os.path.join(base_path, 'data', 'joinmarket_round_events.json'),
+        os.path.join(base_path, 'joinmarket_round_events.json'),
+    ]
+    for candidate_path in candidate_paths:
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return None
+
+
+def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
+    """
+    Obtain JoinMarket coinjoins from emulator-provided round labels.
+    Newer emulator runs may not contain copied jcs-*/joinmarket client logs, but
+    they do contain data/joinmarket_round_events.json with matched txids.
+    """
+    events_file = find_joinmarket_round_events_file(base_path)
+    if events_file is None:
+        return None
+
+    print('Parsing coinjoin-relevant data from JoinMarket round events {}...'.format(events_file), end='')
+    with open(events_file, 'r') as file:
+        round_events = json.load(file)
+
+    cjtx_stats = {}
+    parsed_rounds = {}
+    dropped_decode_failures = 0
+    dropped_missing_txids = 0
+    missing_time_txids = []
+    for event in round_events:
+        txid = event.get('txid')
+        event_round_id = event.get('round_id')
+        round_id = str(event_round_id if event_round_id is not None else txid or len(parsed_rounds) + 1)
+        if not txid:
+            dropped_missing_txids += 1
+            continue
+
+        if txid not in raw_tx_db:
+            dropped_decode_failures += 1
+            logging.warning('Dropping JoinMarket round event for tx=%s missing from exported blocks', txid)
+            continue
+
+        timestamp = (
+            event.get('broadcast_time')
+            or event.get('timestamp')
+            or event.get('round_start_time')
+            or raw_tx_db[txid].get('mine_time')
+        )
+        if not timestamp:
+            missing_time_txids.append(txid)
+            continue
+        try:
+            timestamp = format_mine_time(timestamp)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'JoinMarket round event has invalid timestamp for txid {txid}: {timestamp!r}') from exc
+
+        tx_record = extract_tx_info(txid, raw_tx_db, allow_rpc=False)
+        if tx_record is not None:
+            tx_record['round_id'] = round_id
+            tx_record['round_start_time'] = timestamp
+            tx_record['broadcast_time'] = timestamp
+            tx_record['is_blame_round'] = False
+            tx_record['is_cjtx'] = True
+            tx_record['joinmarket_round_event'] = event
+            cjtx_stats[txid] = tx_record
+            parsed_rounds[round_id] = {'round_start_timestamp': timestamp}
+        else:
+            dropped_decode_failures += 1
+            logging.warning('Dropping JoinMarket round event with undecodable tx=%s', txid)
+        print('.', end='')
+    print('done')
+
+    if missing_time_txids:
+        raise ValueError(
+            'JoinMarket round events missing broadcast/mine time for txids: {}'.format(
+                ', '.join(str(txid) for txid in missing_time_txids)
+            )
+        )
+    SM.print('Total JoinMarket round events loaded: {}'.format(len(round_events)))
+    SM.print(
+        'JoinMarket round events dropped: missing_txid={}, decode_failures={}'.format(
+            dropped_missing_txids,
+            dropped_decode_failures,
+        )
+    )
+    SM.print('Total fully finished coinjoins processed from round events: {}'.format(len(cjtx_stats.keys())))
+    return cjtx_stats, parsed_rounds
 
 
 def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}, allow_rpc: bool = True):
