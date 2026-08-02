@@ -13,6 +13,7 @@ import matplotlib
 from cj_process.cj_structs import SummaryMessages
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_file,
+    find_wasabi_coordinator_log_files,
     find_wasabi_prison_file,
 )
 
@@ -2594,8 +2595,8 @@ def process_experiment(args):
 
         # Parse conjoins from logs
         # Case 1: Local or exported Wasabi coordinator logs
-        coordinator_log_file = find_wasabi_coordinator_log_file(WASABIWALLET_DATA_DIR)
-        if coordinator_log_file is not None:
+        coordinator_log_files = find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR)
+        for coordinator_log_file in coordinator_log_files:
             cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coordinator_log_file, RAW_TXS_DB)
         # Case 2: Docker with joinmarket client
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
@@ -2612,8 +2613,9 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path) and coordinator_log_file is not None:
-            parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
+        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
+            for coordinator_log_file in coordinator_log_files:
+                parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:
