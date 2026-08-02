@@ -11,6 +11,10 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
+from cj_process.wasabi_coordinator import (
+    find_wasabi_coordinator_log_file,
+    find_wasabi_prison_file,
+)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -2386,9 +2390,7 @@ def fix_coordinator_wallet_addresses(cjtx_stats):
 
 
 def load_prison_data(cjtx_stats, base_path):
-    prison_file = os.path.join(base_path, "WalletWasabi", "Backend", "WabiSabi", "Prison.txt")
-    if not os.path.exists(prison_file):
-        prison_file = os.path.join(base_path, "data", "wasabi-backend", "backend", "WabiSabi", "Prison.txt")
+    prison_file = find_wasabi_prison_file(base_path)
     items_in_prison = 0
 
     #detect prison version (<2.0.4 is different than >=2.0.4)
@@ -2613,9 +2615,7 @@ def process_experiment(args):
 
         # Analyze error states
         if op.PARSE_ERRORS:
-            coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'WalletWasabi/Backend/Logs.txt')
-            if not os.path.exists(coord_input_file):  # if not found, try dockerized path
-                coord_input_file = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'wasabi-backend', 'backend', 'Logs.txt')
+            coord_input_file = find_wasabi_coordinator_log_file(WASABIWALLET_DATA_DIR)
             parse_coinjoin_errors(cjtx_stats, coord_input_file)
 
         # Save parsed coinjoin transactions info into json
