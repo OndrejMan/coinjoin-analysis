@@ -7,6 +7,8 @@ hard-coded paths.
 import os
 from pathlib import Path
 
+from cj_process.wasabi_manifest import verify_wasabi_manifest_log_files
+
 
 def find_wasabi_exported_log_files(data_path):
     """Find Wasabi coordinator logs in legacy emulator exports.
@@ -48,7 +50,7 @@ def find_wasabi_exported_log_files(data_path):
     return []
 
 
-def find_wasabi_coordinator_log_files(base_path):
+def find_legacy_wasabi_coordinator_log_files(base_path):
     # Historical manual-Wasabi layout. This is checked first for an analysis
     # input assembled outside coinjoin-emulator; the emulator never writes here.
     local_log_file = os.path.join(base_path, 'WalletWasabi', 'Backend', 'Logs.txt')
@@ -59,6 +61,16 @@ def find_wasabi_coordinator_log_files(base_path):
     # EngineBase.store_logs() creates <base_path>/data and stores artifacts there.
     data_path = os.path.join(base_path, 'data')
     return find_wasabi_exported_log_files(data_path)
+
+
+def find_wasabi_coordinator_log_files(base_path):
+    data_path = os.path.join(base_path, 'data')
+    # A present Wasabi manifest is authoritative. Only runs without one use legacy discovery.
+    manifest_logs_and_count = verify_wasabi_manifest_log_files(data_path)
+    if manifest_logs_and_count is not None:
+        log_files, _ = manifest_logs_and_count
+        return log_files
+    return find_legacy_wasabi_coordinator_log_files(base_path)
 
 
 def find_wasabi_prison_file(base_path):
