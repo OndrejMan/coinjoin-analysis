@@ -1,5 +1,6 @@
 import ast
 import csv
+import glob
 import hashlib
 import math
 import random
@@ -2023,18 +2024,9 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     # 1. Parse logs for each client separately
     # 2. Collate client logs into complete view
 
-    clients_paths = []
-    exp_base_path = os.path.join(base_path, 'data')
-    files = os.listdir(exp_base_path) if os.path.exists(exp_base_path) else logging.error(f'Path {exp_base_path} does not exist')
-    for file in files:
-        target_exp_base_path = os.path.join(exp_base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if os.path.exists(os.path.join(target_exp_base_path, 'joinmarket')):
-                clients_paths.append(target_exp_base_path)
-
     success_coinjoins = {}
-    for client_path in clients_paths:
-        success_coinjoins[client_path] = als.joinmarket_find_coinjoins(os.path.join(client_path, 'joinmarket', 'jmwalletd.log'))
+    for log_file in find_joinmarket_client_log_files(base_path):
+        success_coinjoins[log_file] = als.joinmarket_find_coinjoins(log_file)
 
     all_coinjoins_duplicities = [success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()]
     all_coinjoins = {txid: success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()}
@@ -2069,9 +2061,14 @@ def find_joinmarket_round_events_file(base_path: str):
         os.path.join(base_path, 'joinmarket_round_events.json'),
     ]
     for candidate_path in candidate_paths:
-        if os.path.exists(candidate_path):
+        if os.path.isfile(candidate_path):
             return candidate_path
     return None
+
+
+def find_joinmarket_client_log_files(base_path: str):
+    pattern = os.path.join(base_path, 'data', 'jcs-*', 'joinmarket', 'jmwalletd.log')
+    return sorted(path for path in glob.glob(pattern) if os.path.isfile(path))
 
 
 def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict = {}):
@@ -2997,10 +2994,19 @@ def process_experiment(args):
         # Parse conjoins from logs
         coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
-        if os.path.exists(joinmarket_input_path):
+        joinmarket_log_files = find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
+        joinmarket_round_events_file = find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
+        if joinmarket_log_files:
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
             )
+            if not cjtx_stats['coinjoins'] and joinmarket_round_events_file:
+                logging.info('JoinMarket client logs contained no coinjoins; using round-event labels instead.')
+                cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+            if 'rounds' not in cjtx_stats:
+                cjtx_stats['rounds'] = {'no_round': []}
+        elif joinmarket_round_events_file:
+            cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
         else:
             cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
