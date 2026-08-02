@@ -108,6 +108,15 @@ def longest_common_prefix(paths):
     return prefix if prefix.endswith(os.sep) else os.path.dirname(prefix)
 
 
+def wallet_label(wallet_name):
+    """Return a displayable wallet name, falling back to the unknown marker.
+
+    Only addresses found in a tracked wallet receive a 'wallet_name'; coordinator
+    fee outputs and third-party addresses legitimately stay unattributed.
+    """
+    return str(wallet_name) if wallet_name else UNKNOWN_WALLET_STRING
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, 'rb') as source_file:
@@ -815,6 +824,11 @@ class CoinJoinPlots:
         self.ax_boltzmann_entropy_roundtime_wallets = None
 
 
+def count_wallet_records(records, wallet_name):
+    """Count records attributed to a wallet, tolerating unknown attribution."""
+    return sum(record.get('wallet_name') == wallet_name for record in records.values())
+
+
 def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_exp_name: str=''):
     """
     Analyze coinjoin transactions statistics and plot it to provided CoinJoinPlots structure.
@@ -878,7 +892,8 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
 
         for wallet_name in cjtx_stats['wallets_info'].keys():
             sum_inputs = sum(
-                coinjoins[cjtx]['inputs'][index]['value'] for index in coinjoins[cjtx]['inputs'].keys() if wallet_name == coinjoins[cjtx]['inputs'][index]['wallet_name'])
+                coinjoins[cjtx]['inputs'][index]['value'] for index in coinjoins[cjtx]['inputs'].keys()
+                if wallet_name == coinjoins[cjtx]['inputs'][index].get('wallet_name'))
             sum_outputs = sum(
                 coinjoins[cjtx]['outputs'][index]['value'] for index in coinjoins[cjtx]['outputs'].keys()
                 if 'wallet_name' in coinjoins[cjtx]['outputs'][index].keys() and wallet_name == coinjoins[cjtx]['outputs'][index]['wallet_name'])
@@ -976,8 +991,8 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
                 finished_utxos_all.extend(finished_utxos)
 
                 # Compute stats of this wallet involvement in the current coinjoin cjtx
-                num_inputs_from_wallet = sum([1 for index in coinjoins[cjtx]['inputs'].keys() if coinjoins[cjtx]['inputs'][index]['wallet_name'] == wallet_name])
-                num_outputs_from_wallet = sum([1 for index in coinjoins[cjtx]['outputs'].keys() if coinjoins[cjtx]['outputs'][index]['wallet_name'] == wallet_name])
+                num_inputs_from_wallet = count_wallet_records(coinjoins[cjtx]['inputs'], wallet_name)
+                num_outputs_from_wallet = count_wallet_records(coinjoins[cjtx]['outputs'], wallet_name)
                 per_wallet_stats[cjtx][wallet_name] = {'num_unmixed': len(unmixed_utxos), 'num_mixed': len(mixed_utxos), 'num_finished': len(finished_utxos),
                                                        'num_inputs_wallet': num_inputs_from_wallet, 'num_outputs_wallet': num_outputs_from_wallet}
 
@@ -1348,7 +1363,10 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
                 time_diff = (datetime.strptime(coinjoins[cjtx['txid']]['broadcast_time'],"%Y-%m-%d %H:%M:%S.%f")
                              - datetime.strptime(coinjoins[cjtx['txid']]['round_start_time'],"%Y-%m-%d %H:%M:%S.%f")).total_seconds()
                 tx_entropy = coinjoins[cjtx['txid']]['analysis']['processed']['tx_entropy']
-                wallets_used_intx = [coinjoins[cjtx['txid']]['inputs'][index]['wallet_name'] for index in coinjoins[cjtx['txid']]['inputs'].keys()]
+                wallets_used_intx = [
+                    coinjoins[cjtx['txid']]['inputs'][index].get('wallet_name')
+                    for index in coinjoins[cjtx['txid']]['inputs'].keys()
+                ]
                 if wallet_name in wallets_used_intx:
                     x_cat.append(time_diff + wallet_offset)
                     y_cat.append(tx_entropy)
@@ -1604,7 +1622,9 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
         # Every wallet's utxo as it was before mixing ('spending_tx' does not exist)
         for index in coinjoins[cjtx['txid']]['inputs'].keys():
             coin_value = coinjoins[cjtx['txid']]['inputs'][index]['value']
-            wallet_name = coinjoins[cjtx['txid']]['inputs'][index]['wallet_name']
+            wallet_name = coinjoins[cjtx['txid']]['inputs'][index].get('wallet_name')
+            if wallet_name is None:
+                continue
             if 'spending_tx' not in coinjoins[cjtx['txid']]['inputs'][index].keys():
                 # This output is not spend by any other => output from the mix in the wallet
                 x_txo_initial.append(wallet_name)
@@ -1614,7 +1634,9 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
         # Every for every wallet as it was after mixing ('spend_by' does not exist)
         for index in coinjoins[cjtx['txid']]['analysis2']['outputs'].keys():
             coin_value = coinjoins[cjtx['txid']]['analysis2']['outputs'][index]['value']
-            wallet_name = coinjoins[cjtx['txid']]['analysis2']['outputs'][index]['wallet_name']
+            wallet_name = coinjoins[cjtx['txid']]['analysis2']['outputs'][index].get('wallet_name')
+            if wallet_name is None:
+                continue
             if 'spend_by_txid' not in coinjoins[cjtx['txid']]['outputs'][index].keys():
                 # This output is not spend by any other => output from the mix in the wallet
                 x_txo_final.append(wallet_name)
@@ -2489,7 +2511,7 @@ def graphviz_insert_aggregated_connections(cjtx_stats, target_cjtxid, graphdot):
     # Insert edge (for every wallet) with thickness equivalent to sum of input values
 
     # Wallets used in target_cjtxid
-    wallets_used = set([cjtx_stats[target_cjtxid]['inputs'][index]['wallet_name']
+    wallets_used = set([wallet_label(cjtx_stats[target_cjtxid]['inputs'][index].get('wallet_name'))
                         for index in cjtx_stats[target_cjtxid]['inputs'].keys()])
 
     cjtx = cjtx_stats[target_cjtxid]  # Shortcut for target_cjtxid transaction
@@ -2502,7 +2524,7 @@ def graphviz_insert_aggregated_connections(cjtx_stats, target_cjtxid, graphdot):
         for wallet_name in wallets_used:
             wallet_inputs_sum = 0
             for index in cjtx['inputs'].keys():
-                if wallet_name == cjtx['inputs'][index]['wallet_name']:
+                if wallet_name == wallet_label(cjtx['inputs'][index].get('wallet_name')):
                     value = cjtx['inputs'][index]['value'] if 'value' in cjtx['inputs'][index] else 1
                     if 'spending_tx' in cjtx['inputs'][index].keys():
                         txid, index = cjtx['inputs'][index]['spending_tx']
@@ -2515,7 +2537,8 @@ def graphviz_insert_aggregated_connections(cjtx_stats, target_cjtxid, graphdot):
             if wallet_inputs_sum > 0:  # Plot connection only if at least some satoshies are transfered
                 width = math.log(int(wallet_inputs_sum), 10)  # The sizes might be very different, use log
                 graphdot.edge(prepare_display_cjtxid(other_cjtxid), prepare_display_cjtxid(target_cjtxid),
-                              color=WALLET_COLORS[wallet_name], style='solid', dir='forward', penwidth=f'{width}')
+                              color=WALLET_COLORS.get(wallet_name, WALLET_COLORS[UNKNOWN_WALLET_STRING]),
+                              style='solid', dir='forward', penwidth=f'{width}')
 
 
 def visualize_coinjoins_aggregated(cjtx_stats, base_path='', output_name='coinjoin_graph', view_pdf=True):
@@ -3395,7 +3418,7 @@ def extract_wallets_inouts(base_path: str, paths_to_process: list):
         for cjtx in data_onlycj['coinjoins'].keys():
             wallet_set = set()
             for index in data_onlycj['coinjoins'][cjtx]['inputs'].keys():
-                wallet_set.add(data_onlycj['coinjoins'][cjtx]['inputs'][index]['wallet_name'])
+                wallet_set.add(wallet_label(data_onlycj['coinjoins'][cjtx]['inputs'][index].get('wallet_name')))
             num_wallets = len(wallet_set)
             data_onlycj['coinjoins'][cjtx]['num_wallets'] = num_wallets
 
