@@ -2593,6 +2593,8 @@ def process_experiment(args):
         find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
         or find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
     )
+    if is_joinmarket:
+        mix_protocol = MIX_PROTOCOL.JOINMARKET
     SM.print(f'INPUT PATH: {base_path}')
     save_file = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info.json")
     save_file_stats = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info_stats.json")

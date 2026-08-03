@@ -41,7 +41,7 @@ def test_joinmarket_run_skips_wasabi_error_parsing(tmp_path, caplog):
         mock.patch.object(parse_cj_logs, "load_anonscore_data"),
         mock.patch.object(parse_cj_logs.als, "remove_link_between_inputs_and_outputs"),
         mock.patch.object(parse_cj_logs.als, "compute_link_between_inputs_and_outputs"),
-        mock.patch.object(parse_cj_logs.als, "analyze_input_out_liquidity"),
+        mock.patch.object(parse_cj_logs.als, "analyze_input_out_liquidity") as analyze_liquidity,
     ):
         result = parse_cj_logs.process_experiment((str(tmp_path), False))
 
@@ -50,6 +50,7 @@ def test_joinmarket_run_skips_wasabi_error_parsing(tmp_path, caplog):
     parse_wasabi.assert_not_called()
     parse_wasabi_errors.assert_not_called()
     load_prison_data.assert_not_called()
+    assert analyze_liquidity.call_args.args[4] is parse_cj_logs.MIX_PROTOCOL.JOINMARKET
     assert "Wasabi coordinator" not in caplog.text
 
 
