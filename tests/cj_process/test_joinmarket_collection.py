@@ -62,6 +62,7 @@ def collect(run_dir):
     wasabi.assert_not_called()
     errors.assert_not_called()
     prison.assert_not_called()
+    assert liquidity.call_args.args[4] is parse_cj_logs.MIX_PROTOCOL.JOINMARKET
     return result
 
 
