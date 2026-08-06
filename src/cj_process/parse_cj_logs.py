@@ -2447,7 +2447,9 @@ def load_prison_data(cjtx_stats, base_path):
                 else:
                     print('Unknown prison reason {}'.format(prison_log['reason']))
 
-                cjtx_stats['rounds'][prison_log['round_id']]['logs'].append(prison_log)
+                # Prison records can reference rounds the coordinator log never completed,
+                # so the round record is created on demand instead of assumed to exist.
+                als.insert_by_round_id(cjtx_stats.setdefault('rounds', {}), {prison_log['round_id']: [prison_log]})
                 items_in_prison += 1
 
         SM.print('Total {} records found in prison'.format(items_in_prison))
