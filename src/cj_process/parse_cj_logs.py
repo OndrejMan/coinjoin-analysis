@@ -15,6 +15,7 @@ from cj_process.cj_structs import SummaryMessages
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_files,
     find_wasabi_prison_file,
+    parse_wasabi_coordinator_coinjoins,
 )
 
 matplotlib.use('Agg')
@@ -1889,7 +1890,7 @@ def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}):
     regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Blame Round \((?P<round_id>.*)\): Blame round created from round '(?P<orig_round_id>.*)'?"
     start_blame_rounds_id = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp'])
     # 2023-10-07 11:04:56.723 [43] INFO	Arena.StepTransactionSigningPhaseAsync (374)	Round (dee277ed8fd5d1af24bf09126818b3cec362f52f9fc4323474c2ec5075454d1a): Successfully broadcast the coinjoin: 345386611e7a4543524a3c7fa27f14d511fbb70b1b8786d777b19fb265e95558.
-    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]*)\.?"
+    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]{64})\.?"
     success_coinjoin_round_ids = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp', 'cj_tx_id'])
     # round_cjtx_mapping = find_round_cjtx_mapping(coord_input_file, regex_pattern, 'round_id', 'cj_tx_id')
     round_cjtx_mapping = {round_id: success_coinjoin_round_ids[round_id][0]['cj_tx_id'] for round_id in     # take only the first record found
@@ -1956,7 +1957,7 @@ def parse_coinjoin_errors(cjtx_stats, coord_input_file):
     # Round-dependent information
     #
     # Round id to coinjoin txid mapping
-    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]*)\.?"
+    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]{64})\.?"
     success_coinjoin_round_ids = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp', 'cj_tx_id'])
     als.insert_type(success_coinjoin_round_ids, CJ_LOG_TYPES.COINJOIN_BROADCASTED)
     als.insert_by_round_id(rounds_logs, success_coinjoin_round_ids)
