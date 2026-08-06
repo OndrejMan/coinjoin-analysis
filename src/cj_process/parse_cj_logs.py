@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
+from cj_process.joinmarket_client import joinmarket_parse_coinjoin_logs
 # Re-exported so process_experiment and tests keep addressing them on this module.
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_files,
@@ -1843,57 +1844,6 @@ def build_address_wallet_mapping(cjtx_stats):
                     cjtx_stats['coinjoins'][cjtxid]['outputs'][index]['wallet_name'] = wallet_name
 
     return address_wallet_mapping
-
-
-def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
-    """
-    Obtain information about coinjoins from collated logs from all separate clients
-    :param base_path: base path where docker client images are stored
-    :param raw_tx_db: database of all transaction loaded from btc-node
-    :return: cjtx_stats structure with information about all detected coinjoins
-    """
-    print('Parsing coinjoin-relevant data from joinmarket client logs {}...'.format(base_path), end='')
-    # 1. Parse logs for each client separately
-    # 2. Collate client logs into complete view
-
-    clients_paths = []
-    exp_base_path = os.path.join(base_path, 'data')
-    files = os.listdir(exp_base_path) if os.path.exists(exp_base_path) else logging.error(f'Path {exp_base_path} does not exist')
-    for file in files:
-        target_exp_base_path = os.path.join(exp_base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if os.path.exists(os.path.join(target_exp_base_path, 'joinmarket')):
-                clients_paths.append(target_exp_base_path)
-
-    success_coinjoins = {}
-    for client_path in clients_paths:
-        success_coinjoins[client_path] = als.joinmarket_find_coinjoins(os.path.join(client_path, 'joinmarket', 'jmwalletd.log'))
-
-    all_coinjoins_duplicities = [success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()]
-    all_coinjoins = {txid: success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()}
-
-    SM.print('Total joinmarket coinjoins detected (with duplicities: {}'.format(len(all_coinjoins_duplicities)))
-    SM.print('Total fully finished joinmarket coinjoins found: {}'.format(len(all_coinjoins)))
-    print('Parsing separate coinjoin transactions ', end='')
-    cjtx_stats = {}
-    for cjtxid in all_coinjoins.keys():
-        # extract input and output addresses
-        tx_record = extract_tx_info(cjtxid, raw_tx_db, allow_rpc=allow_rpc)
-        if tx_record is not None:
-            tx_record['round_id'] = cjtxid
-            tx_record['round_start_time'] = all_coinjoins[cjtxid]['timestamp']  # BUGBUG: bad round start time, needs to be extracted from logs better
-            tx_record['broadcast_time'] = all_coinjoins[cjtxid]['timestamp']
-            tx_record['is_blame_round'] = False
-            tx_record['is_cjtx'] = True
-            cjtx_stats[cjtxid] = tx_record
-        else:
-            print('ERROR: decoding transaction for tx={}'.format(cjtxid))
-        print('.', end='')
-    print('done')
-
-    SM.print('Total fully finished coinjoins processed: {}'.format(len(cjtx_stats.keys())))
-
-    return cjtx_stats
 
 
 def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}, allow_rpc: bool = True):
