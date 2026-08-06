@@ -14,6 +14,7 @@ import glob
 import json
 import logging
 import os
+import re
 
 import cj_process.cj_analysis as als
 
@@ -34,6 +35,56 @@ def find_joinmarket_round_events_file(base_path: str):
 def find_joinmarket_client_log_files(base_path: str):
     pattern = os.path.join(base_path, 'data', 'jcs-*', 'joinmarket', 'jmwalletd.log')
     return sorted(path for path in glob.glob(pattern) if os.path.isfile(path))
+
+
+# A derivation path next to an address is proof of ownership: a JoinMarket wallet
+# never knows the path of a counterparty's address, so peer addresses logged during
+# a round (for example in 'Makers responded with') are not matched here.
+JOINMARKET_OWN_ADDRESS_PATTERN = re.compile(
+    r"path:\s*(?P<path>m/[0-9']+[0-9'/]*)\s*,\s*address:\s*(?P<address>\w+)"
+)
+
+
+def joinmarket_wallet_addresses(wallet_path: str):
+    """Collect the addresses a single JoinMarket wallet derived for itself.
+
+    JoinMarket has no 'listkeys' RPC, so keys.json holds a sentinel string and the
+    wallet would stay unattributed.  Ownership is recovered from the two places
+    where the wallet reports a derivation path next to an address: the structured
+    unspent-coin export, and the wallet display lines in its own logs.  The export
+    alone covers only currently unspent coins, so the logs are needed to recover
+    addresses that were already spent.
+
+    :param wallet_path: path of one jcs-* client directory
+    :return: mapping {address: {'address': ..., 'path': ...}}, matching the shape
+        that the keys.json branch of obtain_wallets_info builds
+    """
+    addresses = {}
+
+    unspent_file = os.path.join(wallet_path, 'unspent_coins.json')
+    if os.path.isfile(unspent_file):
+        with open(unspent_file, 'r') as file:
+            unspent_coins = json.load(file)
+        if isinstance(unspent_coins, dict):
+            for utxo in unspent_coins.get('utxos') or []:
+                address = utxo.get('address')
+                if address:
+                    addresses.setdefault(address, {'address': address, 'path': utxo.get('path')})
+
+    log_patterns = [
+        os.path.join(wallet_path, 'joinmarket', 'jmwalletd.log'),
+        os.path.join(wallet_path, 'joinmarket', '.joinmarket', 'logs', '*.log'),
+    ]
+    for log_pattern in log_patterns:
+        for log_file in sorted(glob.glob(log_pattern)):
+            with open(log_file, 'r', errors='replace') as file:
+                for match in JOINMARKET_OWN_ADDRESS_PATTERN.finditer(file.read()):
+                    address = match.group('address')
+                    addresses.setdefault(address, {'address': address, 'path': match.group('path')})
+
+    if not addresses:
+        logger.warning('No JoinMarket wallet addresses recovered from %s', wallet_path)
+    return addresses
 
 
 def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):

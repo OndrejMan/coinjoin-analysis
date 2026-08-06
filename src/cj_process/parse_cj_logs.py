@@ -16,6 +16,7 @@ from cj_process.joinmarket_client import (
     find_joinmarket_round_events_file,
     joinmarket_parse_coinjoin_logs,
     joinmarket_parse_round_events,
+    joinmarket_wallet_addresses,
 )
 # Re-exported so process_experiment and tests keep addressing them on this module.
 from cj_process.wasabi_coordinator import (
@@ -48,6 +49,7 @@ import cj_process.cj_visualize as cjvis
 
 # Configure the logging module
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 logger_to_disable = logging.getLogger("matplotlib")
 logger_to_disable.setLevel(logging.WARNING)
 
@@ -2330,8 +2332,18 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
                         timout_detected = True
 
                     if timout_detected:
-                        logging.error(f'Loading wallet keys failed with \"{wallet_keys}\" for \"{target_base_path}\"')
-                        wallets_info[wallet_name] = {}
+                        # JoinMarket has no 'listkeys' RPC; recover ownership from the
+                        # wallet's own artifacts instead of leaving it unattributed.
+                        recovered_addresses = joinmarket_wallet_addresses(target_base_path)
+                        if recovered_addresses:
+                            logger.info(
+                                'Recovered %d addresses for %s from JoinMarket wallet artifacts',
+                                len(recovered_addresses),
+                                wallet_name,
+                            )
+                        else:
+                            logging.error(f'Loading wallet keys failed with \"{wallet_keys}\" for \"{target_base_path}\"')
+                        wallets_info[wallet_name] = recovered_addresses
                     else:
                         wallets_info[wallet_name] = {addr_data['address']: addr_data for addr_data in wallet_keys}
 
