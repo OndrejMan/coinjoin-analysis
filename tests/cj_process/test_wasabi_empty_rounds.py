@@ -5,6 +5,48 @@ from cj_process import parse_cj_logs
 from utils import write_manifest
 
 
+def write_legacy_prison(tmp_path, prison_rows):
+    log_path = tmp_path / "data" / "wasabi-backend" / "backend" / "Logs.txt"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("coordinator log\n", encoding="utf-8")
+    prison_path = log_path.parent / "WabiSabi" / "Prison.txt"
+    prison_path.parent.mkdir()
+    prison_path.write_text("".join(f"{row}\n" for row in prison_rows), encoding="utf-8")
+    return prison_path
+
+
+def test_load_prison_data_creates_records_for_rounds_without_coinjoin(tmp_path):
+    round_id = "a" * 64
+    utxo = f"{'b' * 64}-0"
+    write_legacy_prison(tmp_path, [f"1700000000,{utxo},RoundDisruption,100000,{round_id},DoubleSpent"])
+
+    # Prison entries exist precisely when rounds failed, so 'rounds' holds only the
+    # placeholder written for experiments without a single completed CoinJoin.
+    cjtx_stats = parse_cj_logs.load_prison_data({"rounds": {"no_round": []}}, str(tmp_path))
+
+    assert cjtx_stats["rounds"]["no_round"] == []
+    prison_logs = cjtx_stats["rounds"][round_id]["logs"]
+    assert len(prison_logs) == 1
+    assert prison_logs[0]["type"] == parse_cj_logs.CJ_LOG_TYPES.UTXO_IN_PRISON.name
+    assert prison_logs[0]["utxo"] == utxo
+    assert prison_logs[0]["adv_reason"] == "DoubleSpent"
+
+
+def test_load_prison_data_keeps_logs_of_already_parsed_round(tmp_path):
+    round_id = "a" * 64
+    write_legacy_prison(tmp_path, [f"1700000000,{'b' * 64}-0,Cheating,{round_id}"])
+
+    cjtx_stats = parse_cj_logs.load_prison_data(
+        {"rounds": {round_id: {"logs": [{"type": "ROUND_STARTED"}]}}},
+        str(tmp_path),
+    )
+
+    assert [entry["type"] for entry in cjtx_stats["rounds"][round_id]["logs"]] == [
+        "ROUND_STARTED",
+        parse_cj_logs.CJ_LOG_TYPES.UTXO_IN_PRISON.name,
+    ]
+
+
 def test_parse_backend_coinjoin_logs_returns_empty_for_incomplete_round(tmp_path):
     log_path = tmp_path / "Logs.txt"
     round_id = "a" * 64
