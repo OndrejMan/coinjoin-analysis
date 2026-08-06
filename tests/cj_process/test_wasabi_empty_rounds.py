@@ -1,9 +1,83 @@
+import json
 from unittest import mock
 
 import pytest
 
 from cj_process import parse_cj_logs
 from utils import write_manifest
+
+
+def test_process_experiment_allows_wasabi_logs_without_complete_rounds(tmp_path):
+    run_dir = tmp_path
+    log_path = run_dir / "data" / "wasabi-coordinator" / "coordinator" / "Logs.txt"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("round started but not completed\n", encoding="utf-8")
+    write_manifest(run_dir, log_path)
+
+    options = parse_cj_logs.EmulParseOptions()
+    for name, value in {
+        "LOAD_TXINFO_FROM_FILE": False,
+        "LOAD_TXINFO_FROM_DOCKER_FILES": True,
+        "READ_ONLY_COINJOIN_TX_INFO": False,
+        "ASSUME_COORDINATOR_WALLET": False,
+        "PARSE_ERRORS": True,
+        "LOAD_COMPUTED_TRANSACTION_INFO": False,
+        "SAVE_ANALYTICS_TO_FILE": False,
+        "GENERATE_COINJOIN_GRAPH_BLIND": False,
+        "GENERATE_COINJOIN_GRAPH": False,
+    }.items():
+        setattr(options, name, value)
+
+    with (
+        mock.patch.object(parse_cj_logs, "op", options, create=True),
+        mock.patch.object(parse_cj_logs, "load_tx_database_from_btccore", return_value={}),
+        mock.patch.object(parse_cj_logs, "obtain_wallets_info", return_value=({}, {})),
+        mock.patch.object(
+            parse_cj_logs,
+            "parse_backend_coinjoin_logs",
+            return_value={},
+        ) as parse_backend_coinjoin_logs,
+        mock.patch.object(parse_cj_logs, "load_prison_data"),
+        mock.patch.object(parse_cj_logs, "load_anonscore_data"),
+        mock.patch.object(
+            parse_cj_logs,
+            "parse_coinjoin_errors",
+            wraps=parse_cj_logs.parse_coinjoin_errors,
+        ) as parse_coinjoin_errors,
+        mock.patch.object(parse_cj_logs.als, "remove_link_between_inputs_and_outputs"),
+        mock.patch.object(parse_cj_logs.als, "compute_link_between_inputs_and_outputs"),
+        mock.patch.object(parse_cj_logs.als, "analyze_input_out_liquidity"),
+    ):
+        result = parse_cj_logs.process_experiment((str(run_dir), False))
+
+    assert result["coinjoins"] == {}
+    assert result["rounds"] == {"no_round": []}
+    parse_backend_coinjoin_logs.assert_called_once_with(str(log_path), {})
+    parse_coinjoin_errors.assert_called_once_with(result, str(log_path))
+
+    coinjoin_info = json.loads((run_dir / "coinjoin_tx_info.json").read_text(encoding="utf-8"))
+    coinjoin_stats = json.loads((run_dir / "coinjoin_tx_info_stats.json").read_text(encoding="utf-8"))
+    assert coinjoin_info["coinjoins"] == {}
+    assert coinjoin_info["rounds"] == {"no_round": []}
+    assert coinjoin_stats["num_coinjoins"] == 0
+
+
+def test_empty_round_keeps_round_independent_error_events(tmp_path):
+    log_path = tmp_path / "Logs.txt"
+    log_path.write_text(
+        "2026-01-01 00:00:00.000 [1] WARNING IdempotencyRequestCache.GetCachedResponseAsync "
+        "WabiSabiProtocolException: Input banned\n",
+        encoding="utf-8",
+    )
+
+    result = parse_cj_logs.parse_coinjoin_errors(
+        {"coinjoins": {}, "rounds": {"no_round": []}},
+        str(log_path),
+    )
+
+    event_groups = result["rounds"]["no_round"]
+    events = [event for group in event_groups for matches in group.values() for event in matches]
+    assert [event["type"] for event in events] == [parse_cj_logs.CJ_LOG_TYPES.INPUT_BANNED.name]
 
 
 def test_manifest_hash_mismatch_is_rejected(tmp_path):

@@ -2043,13 +2043,15 @@ def parse_coinjoin_errors(cjtx_stats, coord_input_file):
     regex_pattern = r"(?P<timestamp>.*) .* WARNING.*WabiSabiProtocolException: Input banned.?"
     input_banned = als.find_round_ids(coord_input_file, regex_pattern, ['timestamp'])
     als.insert_type(input_banned, CJ_LOG_TYPES.INPUT_BANNED)
-    rounds_logs['no_round'].append(input_banned)
+    if input_banned:
+        rounds_logs['no_round'].append(input_banned)
 
     # NOT_ENOUGH_FUNDS 2023-09-02 10:18:48.814 [47] WARNING	IdempotencyRequestCache.GetCachedResponseAsync (79)	WalletWasabi.WabiSabi.Backend.Models.WabiSabiProtocolException: Not enough funds
     regex_pattern = r"(?P<timestamp>.*) .* WARNING.*WabiSabiProtocolException: Not enough funds.?"
     not_enough_funds = als.find_round_ids(coord_input_file, regex_pattern, ['timestamp'])
     als.insert_type(not_enough_funds, CJ_LOG_TYPES.NOT_ENOUGH_FUNDS)
-    rounds_logs['no_round'].append(not_enough_funds)
+    if not_enough_funds:
+        rounds_logs['no_round'].append(not_enough_funds)
 
     if 'rounds' not in cjtx_stats.keys():
         cjtx_stats['rounds'] = {}
@@ -2626,14 +2628,16 @@ def process_experiment(args):
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
         # Parse conjoins from logs
-        # Case 1: Local or exported Wasabi coordinator logs
-        coordinator_log_files = find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR)
-        for coordinator_log_file in coordinator_log_files:
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coordinator_log_file, RAW_TXS_DB)
-        # Case 2: Docker with joinmarket client
+        coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
+        else:
+            cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB
+            )
+            if not coinjoin_log_files:
+                cjtx_stats['rounds'] = {'no_round': []}
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
@@ -2643,9 +2647,16 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
-            for coordinator_log_file in coordinator_log_files:
-                parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
+        if not os.path.exists(joinmarket_input_path):
+            if op.PARSE_ERRORS and coinjoin_log_files:
+                for coinjoin_log_file in coinjoin_log_files:
+                    parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
+            elif op.PARSE_ERRORS:
+                if 'rounds' not in cjtx_stats:
+                    cjtx_stats['rounds'] = {'no_round': []}
+                logging.info(
+                    'Skipping Wasabi coordinator error parsing; no completed CoinJoin rounds were found.'
+                )
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:
