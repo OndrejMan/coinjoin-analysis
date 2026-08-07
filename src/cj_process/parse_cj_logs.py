@@ -11,6 +11,11 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
+from cj_process.emulation_targets import (
+    EmulationTargetError,
+    is_experiment,
+    validate_emulation_targets,
+)
 from cj_process.joinmarket_client import (
     find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
@@ -2881,10 +2886,8 @@ def get_experiments_base_paths(base_path: str):
     paths_to_process = []
     for file in files:
         target_exp_base_path = os.path.join(base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if (os.path.exists(os.path.join(target_exp_base_path, 'WalletWasabi'))
-                    or os.path.exists(os.path.join(target_exp_base_path, 'data'))):
-                paths_to_process.append(target_exp_base_path)
+        if is_experiment(Path(target_exp_base_path)):
+            paths_to_process.append(target_exp_base_path)
 
     return paths_to_process
 
@@ -3247,32 +3250,6 @@ def backup_log_files(target_path: str):
         logging.warning(f'Log file {log_file_path} does not found, not copied.')
 
 
-def validate_emulation_target(target_path: str) -> str:
-    path = Path(target_path)
-    if not path.is_dir():
-        raise argparse.ArgumentTypeError(
-            f"EmuCoinJoin output path does not exist: {target_path}"
-        )
-
-    try:
-        has_experiment = any(
-            experiment.is_dir() and (experiment / "data").is_dir()
-            for experiment in path.iterdir()
-        )
-    except OSError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Cannot inspect EmuCoinJoin output path {target_path}: {exc}"
-        ) from exc
-
-    if not has_experiment:
-        raise argparse.ArgumentTypeError(
-            f"No EmuCoinJoin experiments found under {target_path}; "
-            f"expected {target_path}/<experiment>/data/"
-        )
-
-    return target_path
-
-
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action",
@@ -3283,7 +3260,7 @@ def parse_arguments(argv):
                         required=False)
     parser.add_argument("-tp", "--target-path",
                         help="Target path with experiment(s) to be processed.",
-                        action="append", metavar="PATH", type=validate_emulation_target,
+                        action="append", metavar="PATH",
                         required=False)
     parser.add_argument("-lc", "--load-config",
                         help="Load all configuration from file",
@@ -3294,7 +3271,13 @@ def parse_arguments(argv):
                         action="store", metavar="ENV_VARS",
                         required=False)
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.target_path:
+        try:
+            validate_emulation_targets(args.target_path, args.action)
+        except EmulationTargetError as exc:
+            parser.error(str(exc))
+    return args
 
 
 class AnalysisType(Enum):
