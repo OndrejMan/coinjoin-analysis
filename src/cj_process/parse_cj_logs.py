@@ -5,6 +5,8 @@ import random
 import re
 import shutil
 import json
+from typing import Any, TextIO
+
 import emulation.wcli as wcli
 from graphviz import Digraph
 import numpy as np
@@ -83,6 +85,10 @@ class MissingBlockDataError(RuntimeError):
     """Raised when the run directory carries no fullnode block data to time coins by."""
 
 
+class WalletExportError(RuntimeError):
+    """Raised when a wallet export cannot be parsed, so its ownership data is unknown."""
+
+
 # colors used for different wallet clusters. Avoid following colors : 'red' (used for cjtx)
 COLORS = ['darkorange', 'green', 'lightblue', 'gray', 'aquamarine', 'darkorchid1', 'cornsilk3', 'chocolate',
           'deeppink1', 'cadetblue', 'darkgreen', 'burlywood4', 'cyan', 'darkgray', 'darkslateblue', 'dodgerblue4',
@@ -91,6 +97,21 @@ LINE_STYLES = ['-', '--', '-.', ':']
 
 SM = SummaryMessages()
 als.SM = SM
+
+
+def load_wallet_export(export_file: TextIO) -> Any:
+    """Parse an opened wallet export, naming the file when it is unusable.
+
+    The emulator opens each export before querying the client, so a client that
+    stopped responding leaves an empty file behind.
+
+    :raises WalletExportError: if the file does not hold valid JSON
+    """
+    try:
+        return json.load(export_file)
+    except json.JSONDecodeError as error:
+        raise WalletExportError(
+            f'Wallet export {export_file.name} is empty or damaged: {error}') from error
 
 
 def float_equals(a, b, tolerance=1e-9):
@@ -2310,7 +2331,7 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
                 # Wallet coins (as obtained by 'listcoins' RPC)
                 with open(os.path.join(target_base_path, 'coins.json'), "r") as file:
-                    wallet_coins = json.load(file)
+                    wallet_coins = load_wallet_export(file)
                     if isinstance(wallet_coins, str) and (wallet_coins.lower() == 'timeout' or wallet_coins.lower() == 'this method is not available in joinmarket'):
                         logging.error(f'Loading wallet keys failed with \"{wallet_coins}\" for \"{target_base_path}\"')
                         wallets_coins_all[wallet_name] = {}
@@ -2325,7 +2346,7 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
                 # Wallet addresses (as obtained by 'listkeys' RPC) - now extracted from 'keys.json' file
                 with open(os.path.join(target_base_path, 'keys.json'), "r") as file:
-                    wallet_keys = json.load(file)
+                    wallet_keys = load_wallet_export(file)
                     timout_detected = False
                     if isinstance(wallet_coins, str) and (wallet_coins.lower() == 'timeout' or wallet_coins.lower() == 'this method is not available in joinmarket'):
                         timout_detected = True

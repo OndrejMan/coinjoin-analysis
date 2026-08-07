@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from cj_process.parse_cj_logs import obtain_wallets_info
+from cj_process.parse_cj_logs import WalletExportError, obtain_wallets_info
 from cj_process.wallet_attribution import (
     COORDINATOR_WALLET_STRING,
     CoordinatorAttributionError,
@@ -121,9 +121,9 @@ def test_blank_wallet_name_counts_as_unattributed():
         assert_all_coins_attributed(coinjoins)
 
 
-def write_wallet(tmp_path, wallet_name, keys, coins='[]', unspent=None):
+def write_wallet(tmp_path, wallet_name, keys, coins='[]', unspent=None, client='wasabi-client'):
     """Lay out the docker-file wallet directory obtain_wallets_info() reads."""
-    wallet_dir = tmp_path / 'data' / f'wasabi-client-{wallet_name}'
+    wallet_dir = tmp_path / 'data' / f'{client}-{wallet_name}'
     wallet_dir.mkdir(parents=True)
     (wallet_dir / 'keys.json').write_text(keys)
     (wallet_dir / 'coins.json').write_text(coins)
@@ -163,3 +163,22 @@ def test_working_listkeys_wallet_is_untouched(tmp_path):
     wallets_info, _ = obtain_wallets_info(str(tmp_path), False, True, {})
 
     assert list(wallets_info['wallet-000']) == ['bcrt1qnormal']
+
+
+@pytest.mark.parametrize('invalid_json', ['', '{invalid'])
+@pytest.mark.parametrize('export', ['coins', 'keys'])
+def test_damaged_wallet_export_aborts_collection(tmp_path, export, invalid_json):
+    exports = {'keys': '[]', 'coins': '[]', export: invalid_json}
+    write_wallet(tmp_path, '000', **exports)
+
+    with pytest.raises(WalletExportError, match=rf'{export}\.json is empty or damaged'):
+        obtain_wallets_info(str(tmp_path), False, True, {})
+
+
+def test_client_that_died_during_export_aborts_collection(tmp_path):
+    wallet_dir = tmp_path / 'data' / 'wasabi-client-000'
+    wallet_dir.mkdir(parents=True)
+    (wallet_dir / 'coins.json').write_text('')
+
+    with pytest.raises(WalletExportError, match=r'coins\.json is empty or damaged'):
+        obtain_wallets_info(str(tmp_path), False, True, {})
