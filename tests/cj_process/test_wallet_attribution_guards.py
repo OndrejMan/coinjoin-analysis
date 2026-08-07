@@ -121,9 +121,9 @@ def test_blank_wallet_name_counts_as_unattributed():
         assert_all_coins_attributed(coinjoins)
 
 
-def write_wallet(tmp_path, wallet_name, keys, coins='[]', unspent=None):
+def write_wallet(tmp_path, wallet_name, keys, coins='[]', unspent=None, client='wasabi-client'):
     """Lay out the docker-file wallet directory obtain_wallets_info() reads."""
-    wallet_dir = tmp_path / 'data' / f'wasabi-client-{wallet_name}'
+    wallet_dir = tmp_path / 'data' / f'{client}-{wallet_name}'
     wallet_dir.mkdir(parents=True)
     (wallet_dir / 'keys.json').write_text(keys)
     (wallet_dir / 'coins.json').write_text(coins)
@@ -162,3 +162,33 @@ def test_working_listkeys_wallet_is_untouched(tmp_path):
     wallets_info, _ = obtain_wallets_info(str(tmp_path), False, True, {})
 
     assert list(wallets_info['wallet-000']) == ['bcrt1qnormal']
+
+
+@pytest.mark.parametrize('invalid_json', ['', '{invalid'])
+def test_empty_or_invalid_coins_export_does_not_abort_collection(tmp_path, caplog, invalid_json):
+    write_wallet(tmp_path, '000', keys='[]', coins=invalid_json)
+
+    wallets_info, wallets_coins = obtain_wallets_info(str(tmp_path), False, True, {})
+
+    assert wallets_info['wallet-000'] == {}
+    assert wallets_coins['wallet-000'] == {}
+    assert 'Empty or invalid coins.json' in caplog.text
+
+
+@pytest.mark.parametrize('invalid_json', ['', '{invalid'])
+def test_empty_or_invalid_keys_export_still_recovers_joinmarket_addresses(tmp_path, caplog, invalid_json):
+    unspent = {'utxos': [{'address': 'bcrt1qrecovered', 'path': "m/84'/1'/0'/0/0"}]}
+    write_wallet(
+        tmp_path,
+        '000',
+        keys=invalid_json,
+        coins=json.dumps('This method is not available in JoinMarket'),
+        unspent=unspent,
+        client='jcs',
+    )
+
+    wallets_info, wallets_coins = obtain_wallets_info(str(tmp_path), False, True, {})
+
+    assert 'bcrt1qrecovered' in wallets_info['wallet-000']
+    assert wallets_coins['wallet-000'] == {}
+    assert 'Empty or invalid keys.json' in caplog.text
