@@ -24,6 +24,14 @@ from cj_process.wasabi_coordinator import (
     find_wasabi_prison_file,
     parse_wasabi_coordinator_coinjoins,
 )
+from cj_process.wallet_attribution import (
+    COORDINATOR_WALLET_STRING,
+    CoordinatorAttributionError,
+    UNKNOWN_WALLET_STRING,
+    UnattributedCoinsError,
+    assert_all_coins_attributed,
+    assert_no_coordinator_for_joinmarket,
+)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -57,8 +65,6 @@ BTC_CLI_PATH = os.environ.get('BITCOIN_CLI_PATH', 'bitcoin-cli')
 WASABIWALLET_DATA_DIR = ''
 TX_AD_CUT_LEN = 16  # length of displayed address or txid
 WALLET_COLORS = {}
-UNKNOWN_WALLET_STRING = 'UNKNOWN'
-COORDINATOR_WALLET_STRING = 'Coordinator'
 PRINT_COLLATED_COORD_CLIENT_LOGS = False
 INSERT_WALLET_NODES = False
 VERBOSE = False
@@ -2342,7 +2348,13 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
                                 wallet_name,
                             )
                         else:
-                            logging.error(f'Loading wallet keys failed with \"{wallet_keys}\" for \"{target_base_path}\"')
+                            logger.warning(
+                                'Loading wallet keys failed with %r for %s and no addresses could be '
+                                'recovered. Continuing because the wallet may not participate; CoinJoin '
+                                'coin attribution is validated before analysis.',
+                                wallet_keys,
+                                target_base_path,
+                            )
                         wallets_info[wallet_name] = recovered_addresses
                     else:
                         wallets_info[wallet_name] = {addr_data['address']: addr_data for addr_data in wallet_keys}
@@ -2740,6 +2752,13 @@ def process_experiment(args):
                 file.write(json.dumps(dict(sorted(cjtx_stats.items())), indent=4))
         print('done')
 
+    # Wallet attribution is final here. The coordinator fallback above covers a single
+    # address length, so coins of any other length arrive unattributed; and where it did
+    # apply, it can hide an incomplete address list behind a label JoinMarket cannot have.
+    assert_all_coins_attributed(cjtx_stats['coinjoins'])
+    if is_joinmarket:
+        assert_no_coordinator_for_joinmarket(cjtx_stats['coinjoins'])
+
     if op.LOAD_COMPUTED_TRANSACTION_INFO:
         # if available, use already computed tx entropy analysis
         #   (expected files 'tx_analysis_cjtxid'.json in 'tx' folder)
@@ -2934,6 +2953,10 @@ def visualize_aggregated_graphs(experiment_paths_sorted, graphs, base_path: str,
             # Load parsed coinjoin transactions again
             with open(data_file, "r") as file:
                 cjtx_stats = json.load(file)
+
+            # This path replots stored results without rebuilding attribution, so a run
+            # parsed by an older version can carry coins no wallet claims
+            assert_all_coins_attributed(cjtx_stats['coinjoins'])
 
             # Set targeted named subplot to next unused axes
             # Case 1: Collating results for same number of wallets (collate_same_num_wallets == True), use every subplot
