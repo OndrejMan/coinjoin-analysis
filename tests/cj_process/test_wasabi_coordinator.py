@@ -115,6 +115,18 @@ def test_legacy_unrecognized_log_is_rejected(tmp_path):
         wasabi_coordinator.parse_wasabi_coordinator_coinjoins(str(tmp_path), {})
 
 
+def test_missing_coordinator_log_lists_the_searched_paths(tmp_path):
+    with pytest.raises(FileNotFoundError) as excinfo:
+        wasabi_coordinator.parse_wasabi_coordinator_coinjoins(str(tmp_path), {})
+
+    message = str(excinfo.value)
+    assert 'Searched:' in message
+    assert str(tmp_path / 'data' / 'coinjoin_label_manifest.json') in message
+    assert str(tmp_path / 'WalletWasabi' / 'Backend' / 'Logs.txt') in message
+    assert str(tmp_path / 'data' / 'wasabi-coordinator*' / '**' / 'Logs.txt') in message
+    assert str(tmp_path / 'data' / 'wasabi-backend*' / '**' / 'Logs.txt') in message
+
+
 def test_manifest_broadcast_must_be_processed_by_analyzer(tmp_path):
     log_path = tmp_path / "data" / "wasabi-coordinator" / "coordinator" / "Logs.txt"
     log_path.parent.mkdir(parents=True)

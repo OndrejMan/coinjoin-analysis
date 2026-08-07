@@ -82,6 +82,16 @@ def find_legacy_wasabi_coordinator_log_files(base_path):
     return find_wasabi_exported_log_files(data_path)
 
 
+def wasabi_coordinator_log_search_patterns(base_path):
+    """Return the manifest path and filesystem patterns used for discovery."""
+    return [
+        os.path.join(base_path, 'data', 'coinjoin_label_manifest.json'),
+        os.path.join(base_path, 'WalletWasabi', 'Backend', 'Logs.txt'),
+        os.path.join(base_path, 'data', 'wasabi-coordinator*', '**', 'Logs.txt'),
+        os.path.join(base_path, 'data', 'wasabi-backend*', '**', 'Logs.txt'),
+    ]
+
+
 def find_wasabi_coordinator_log_files(base_path):
     data_path = os.path.join(base_path, 'data')
     # A present Wasabi manifest is authoritative. Only runs without one use legacy discovery.
@@ -199,9 +209,10 @@ def parse_wasabi_coordinator_coinjoins(base_path, raw_txs, allow_rpc: bool = Tru
     """
     coordinator_log_files, expected_positive_count = resolve_wasabi_coordinator_logs(base_path)
     if not coordinator_log_files:
+        searched = '\n  '.join(wasabi_coordinator_log_search_patterns(base_path))
         raise FileNotFoundError(
-            'No Wasabi coordinator log file found in the producer label manifest, '
-            'local WalletWasabi data, or exported emulator data.'
+            'No Wasabi coordinator log file found for emulation analysis. '
+            f'Searched:\n  {searched}'
         )
 
     # Cheap pass over the raw text first, so a manifest mismatch fails before the full parse.
