@@ -24,6 +24,9 @@ from cj_process.joinmarket_client import (
     joinmarket_parse_coinjoin_logs,
     joinmarket_wallet_addresses,
 )
+from cj_process.producer_manifest import (
+    producer_label_manifest_engine,
+)
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_file,
     find_wasabi_coordinator_log_files,
@@ -2517,6 +2520,12 @@ def fix_coordinator_wallet_addresses(cjtx_stats):
 
 def detect_mix_protocol(base_path):
     """Detect the mixing protocol of an experiment from the raw client artifacts it kept."""
+    manifest_engine = producer_label_manifest_engine(os.path.join(base_path, 'data'))
+    if manifest_engine == 'joinmarket':
+        return MIX_PROTOCOL.JOINMARKET
+    if manifest_engine == 'wasabi':
+        return MIX_PROTOCOL.WASABI2
+
     if find_joinmarket_client_log_files(base_path) or find_joinmarket_round_events_file(base_path):
         return MIX_PROTOCOL.JOINMARKET
     return MIX_PROTOCOL.WASABI2

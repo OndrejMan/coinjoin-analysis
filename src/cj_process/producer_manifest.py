@@ -11,3 +11,8 @@ def load_producer_label_manifest(data_path: str) -> Any | None:
         return None
     with open(manifest_path, 'r', encoding='utf-8') as manifest_file:
         return json.load(manifest_file)
+
+
+def producer_label_manifest_engine(data_path):
+    manifest = load_producer_label_manifest(data_path)
+    return manifest.get('engine') if manifest is not None else None
