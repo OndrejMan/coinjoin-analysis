@@ -964,22 +964,31 @@ def joinmarket_find_coinjoins(filename):
             while line_index < len(lines):
                 regex_pattern = r"(?P<timestamp>.*) \[INFO\]  obtained tx"
                 match = re.search(regex_pattern, lines[line_index])
+                tx_line_index = line_index
                 line_index = line_index + 1
                 if match is None:
                     continue
                 else:
                     cjtx_lines = []
                     # After 'obtained tx', json is pasted in logs. Find its end by '}'
-                    while lines[line_index] != '}\n':
+                    while line_index < len(lines) and lines[line_index] != '}\n':
                         cjtx_lines.append(lines[line_index])
                         line_index = line_index + 1
+                    if line_index >= len(lines):
+                        raise ValueError(f"unterminated transaction json started on line {tx_line_index + 1}")
                     cjtx_lines.append(lines[line_index])
                     # Reconstruct json
                     cjtx_json = json.loads("".join(cjtx_lines))
                     # read next line to extract timestamp
                     line_index = line_index + 1
+                    if line_index >= len(lines):
+                        raise ValueError(f"no log line follows the transaction json started on "
+                                         f"line {tx_line_index + 1} to take the timestamp from")
                     regex_pattern = r"(?P<timestamp>.*) \[INFO\]"
                     match = re.search(regex_pattern, lines[line_index])
+                    if match is None:
+                        raise ValueError(f"line {line_index + 1} carries no timestamp for the "
+                                         f"transaction json started on line {tx_line_index + 1}")
                     # Extract timestamp, replace , by . before fraction of seconds
                     cjtx_json['timestamp'] = match.group('timestamp').strip().replace(',', '.')
 
@@ -995,12 +1004,17 @@ def joinmarket_find_coinjoins(filename):
                     # cjtx_json = json.loads("".join(cjtx_lines))
                     # cjtx_json['timestamp'] = match.group('timestamp').strip()
 
+                    if 'txid' not in cjtx_json:
+                        raise ValueError(f"transaction json started on line {tx_line_index + 1} has no txid")
                     hits[cjtx_json['txid']] = cjtx_json
 
     except FileNotFoundError:
-        print(f"File '{filename}' not found.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        # A log that vanished is not an experiment without coinjoins either.
+        raise
+    except Exception as exc:
+        # Returning what was parsed so far would make a damaged log indistinguishable
+        # from a run that simply produced no coinjoins.
+        raise ValueError(f"Failed to parse JoinMarket client log '{filename}': {exc}") from exc
 
     return hits
 
