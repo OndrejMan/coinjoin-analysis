@@ -2857,7 +2857,10 @@ def process_experiment(args):
     #parse_client_coinjoin_logs(cjtx_stats, client_input_path)
     # TODO: load client logs from multiple directories 'wasabi-client-x'
 
-    if not is_joinmarket:
+    # Prison records are read once, during collection, and are part of the saved round logs
+    # from then on. Reading Prison.txt again would append a second copy of every record,
+    # so each analyze_only run would report more UTXOs in prison than the one before.
+    if not is_joinmarket and not op.LOAD_TXINFO_FROM_FILE:
         load_prison_data(cjtx_stats, WASABIWALLET_DATA_DIR)
 
     load_anonscore_data(cjtx_stats, WASABIWALLET_DATA_DIR)

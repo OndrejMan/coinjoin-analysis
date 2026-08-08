@@ -14,6 +14,11 @@ from cj_process import parse_cj_logs
 from cj_process.cj_analysis import MIX_PROTOCOL
 from utils import write_manifest
 
+PRISON_ROWS = (
+    f"1700000000,{'b' * 64}-0,RoundDisruption,100000,{'a' * 64},DoubleSpent",
+    f"1700000600,{'c' * 64}-1,Cheating,{'d' * 64}",
+)
+
 
 def make_options(**overrides):
     options = parse_cj_logs.EmulParseOptions()
@@ -48,12 +53,25 @@ def run_process_experiment(run_dir, options):
     return result, analyze_liquidity
 
 
-def write_wasabi_run(run_dir):
+def count_prison_records(cjtx_stats):
+    return sum(
+        1
+        for round_record in cjtx_stats["rounds"].values()
+        if isinstance(round_record, dict)
+        for log_record in round_record.get("logs", [])
+        if log_record["type"] == parse_cj_logs.CJ_LOG_TYPES.UTXO_IN_PRISON.name
+    )
+
+
+def write_wasabi_run_with_prison(run_dir):
     log_path = run_dir / "data" / "wasabi-coordinator" / "coordinator" / "Logs.txt"
     log_path.parent.mkdir(parents=True)
     log_path.write_text("round started but not completed\n", encoding="utf-8")
     write_manifest(run_dir, log_path)
-    return log_path
+    prison_path = log_path.parent / "WabiSabi" / "Prison.txt"
+    prison_path.parent.mkdir()
+    prison_path.write_text("".join(f"{row}\n" for row in PRISON_ROWS), encoding="utf-8")
+    return prison_path
 
 
 def write_collected_experiment(run_dir, **overrides):
@@ -69,8 +87,32 @@ def write_collected_experiment(run_dir, **overrides):
     return cjtx_stats
 
 
+def test_analyze_only_does_not_duplicate_prison_records(tmp_path):
+    write_wasabi_run_with_prison(tmp_path)
+
+    collected, _ = run_process_experiment(tmp_path, make_options())
+    assert count_prison_records(collected) == len(PRISON_ROWS)
+
+    # Prison events are part of the collected file, so replaying the analysis on it
+    # must keep reporting the same number of imprisoned UTXOs.
+    for _ in range(2):
+        saved = json.loads((tmp_path / "coinjoin_tx_info.json").read_text(encoding="utf-8"))
+        assert count_prison_records(saved) == len(PRISON_ROWS)
+
+        analyzed, _ = run_process_experiment(
+            tmp_path,
+            make_options(
+                LOAD_TXINFO_FROM_FILE=True,
+                LOAD_TXINFO_FROM_DOCKER_FILES=False,
+                PARSE_ERRORS=False,
+                LOAD_COMPUTED_TRANSACTION_INFO=True,
+            ),
+        )
+        assert count_prison_records(analyzed) == len(PRISON_ROWS)
+
+
 def test_collected_experiment_records_its_mix_protocol(tmp_path):
-    write_wasabi_run(tmp_path)
+    write_wasabi_run_with_prison(tmp_path)
 
     collected, _ = run_process_experiment(tmp_path, make_options())
 
