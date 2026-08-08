@@ -38,6 +38,12 @@ def load_producer_label_manifest(data_path):
     return manifest
 
 
+def producer_label_manifest_engine(data_path):
+    """Return the declared engine without requiring a manifest for legacy runs."""
+    manifest = load_producer_label_manifest(data_path)
+    return manifest.get('engine') if manifest is not None else None
+
+
 def verify_producer_manifest_source(source, data_root, engine_name, source_is_allowed):
     """Return one integrity-checked source path constrained to the data directory."""
     relative_path = source.get('path') if isinstance(source, dict) else None

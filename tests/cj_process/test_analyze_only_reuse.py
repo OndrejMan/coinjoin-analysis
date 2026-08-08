@@ -121,6 +121,48 @@ def test_collected_experiment_records_its_mix_protocol(tmp_path):
     assert saved["mix_protocol"] == MIX_PROTOCOL.WASABI2.value
 
 
+def test_detect_mix_protocol_prefers_wasabi_manifest_over_stale_joinmarket_artifacts(tmp_path):
+    wasabi_log = tmp_path / "data" / "wasabi-coordinator" / "Logs.txt"
+    wasabi_log.parent.mkdir(parents=True)
+    wasabi_log.write_text("round started but not completed\n", encoding="utf-8")
+    write_manifest(tmp_path, wasabi_log)
+
+    stale_log = tmp_path / "data" / "jcs-000" / "joinmarket" / "jmwalletd.log"
+    stale_log.parent.mkdir(parents=True)
+    stale_log.write_text("stale JoinMarket log\n", encoding="utf-8")
+    (tmp_path / "data" / "joinmarket_round_events.json").write_text("[]", encoding="utf-8")
+
+    assert parse_cj_logs.detect_mix_protocol(str(tmp_path)) == MIX_PROTOCOL.WASABI2
+
+
+def test_wasabi_manifest_keeps_collection_on_wasabi_with_stale_joinmarket_artifacts(tmp_path):
+    write_wasabi_run_with_prison(tmp_path)
+    stale_log = tmp_path / "data" / "jcs-000" / "joinmarket" / "jmwalletd.log"
+    stale_log.parent.mkdir(parents=True)
+    stale_log.write_text("stale JoinMarket log\n", encoding="utf-8")
+    (tmp_path / "data" / "joinmarket_round_events.json").write_text("[]", encoding="utf-8")
+
+    with (
+        mock.patch.object(
+            parse_cj_logs,
+            "joinmarket_parse_coinjoin_logs",
+            side_effect=AssertionError("stale JoinMarket client log was parsed"),
+        ) as parse_joinmarket_logs,
+        mock.patch.object(
+            parse_cj_logs,
+            "joinmarket_parse_round_events",
+            side_effect=AssertionError("stale JoinMarket round events were parsed"),
+        ) as parse_joinmarket_events,
+    ):
+        collected, analyze_liquidity = run_process_experiment(tmp_path, make_options())
+
+    assert collected["mix_protocol"] == MIX_PROTOCOL.WASABI2.value
+    assert count_prison_records(collected) == len(PRISON_ROWS)
+    assert analyze_liquidity.call_args.args[-1] == MIX_PROTOCOL.WASABI2
+    parse_joinmarket_logs.assert_not_called()
+    parse_joinmarket_events.assert_not_called()
+
+
 def test_analyze_only_keeps_joinmarket_protocol_without_raw_logs(tmp_path):
     # analyze_only requires coinjoin_tx_info.json only, so the JoinMarket client logs
     # the protocol was originally detected from are gone here.

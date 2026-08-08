@@ -1,9 +1,8 @@
 """Locate the JoinMarket artifacts of a run and parse the CoinJoins they describe.
 
-Two sources are supported. Older emulator runs copy the jcs-*/joinmarket client
-logs, which are parsed for successful CoinJoins; newer runs may omit them and
-instead ship data/joinmarket_round_events.json, where the emulator already
-matched each round to a txid.
+Current emulator runs declare an integrity-checked round-event file in their
+producer-label manifest. Older runs without a manifest remain compatible: their
+jcs-*/joinmarket client logs take precedence over an optional round-event file.
 
 ``parse_cj_logs`` is imported lazily inside the functions that need it: it
 imports this module at module level, and the references (extract_tx_info,
@@ -17,6 +16,7 @@ import os
 import re
 
 import cj_process.cj_analysis as als
+from cj_process.joinmarket_manifest import verify_joinmarket_manifest_round_events_file
 
 logger = logging.getLogger(__name__)
 
@@ -143,13 +143,36 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict):
     # Resolved at call time so tests can patch ``parse_cj_logs`` attributes; see module docstring.
     from cj_process import parse_cj_logs
 
-    events_file = find_joinmarket_round_events_file(base_path)
+    manifest_source_and_count = verify_joinmarket_manifest_round_events_file(base_path)
+    if manifest_source_and_count is None:
+        events_file = find_joinmarket_round_events_file(base_path)
+        expected_positive_count = None
+    else:
+        events_file, expected_positive_count = manifest_source_and_count
     if events_file is None:
         return None
 
     print(f'Parsing CoinJoin-relevant data from JoinMarket round events {events_file}...', end='')
     with open(events_file, 'r') as file:
         round_events = json.load(file)
+    if not isinstance(round_events, list):
+        raise ValueError(f'JoinMarket round event source must contain a JSON list: {events_file}')
+    if any(not isinstance(event, dict) for event in round_events):
+        invalid_event = next(event for event in round_events if not isinstance(event, dict))
+        raise ValueError(f'JoinMarket round event must contain a JSON object: {invalid_event!r}')
+
+    producer_positive_txids = None
+    if expected_positive_count is not None:
+        producer_positive_txids = {
+            str(event['txid'])
+            for event in round_events
+            if event.get('status') == 'confirmed' and event.get('txid')
+        }
+        if len(producer_positive_txids) != expected_positive_count:
+            raise ValueError(
+                'JoinMarket producer positive count does not match its round-event source: '
+                f'parsed {len(producer_positive_txids)}, expected {expected_positive_count}'
+            )
 
     cjtx_stats = {}
     parsed_rounds = {}
@@ -161,7 +184,13 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict):
     conflicting_round_ids = []
     conflicting_txids = []
     for event in round_events:
-        txid = event.get('txid')
+        # The current producer counts only reconciled, confirmed transactions as
+        # positives. Legacy files predate this manifest contract and retain the
+        # previous behavior of accepting any record carrying a txid.
+        if expected_positive_count is not None and event.get('status') != 'confirmed':
+            continue
+        raw_txid = event.get('txid')
+        txid = str(raw_txid) if raw_txid else None
         event_round_id = event.get('round_id')
         round_id = str(event_round_id if event_round_id is not None else txid or len(parsed_rounds) + 1)
         if not txid:
@@ -234,6 +263,14 @@ def joinmarket_parse_round_events(base_path: str, raw_tx_db: dict):
         raise ValueError(
             f'JoinMarket txids map to multiple round ids: {conflicting_txids_text}'
         )
+    if producer_positive_txids is not None:
+        missing_txids = sorted(producer_positive_txids - set(cjtx_stats))
+        if missing_txids:
+            raise ValueError(
+                'JoinMarket producer labels were not all parsed as CoinJoins: '
+                f'parsed {len(cjtx_stats)}, expected {expected_positive_count}, '
+                f'missing={missing_txids}'
+            )
     parse_cj_logs.SM.print(f'Total JoinMarket round events loaded: {len(round_events)}')
     parse_cj_logs.SM.print(
         'JoinMarket round events dropped: '

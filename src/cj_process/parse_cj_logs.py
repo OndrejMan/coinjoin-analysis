@@ -23,6 +23,10 @@ from cj_process.joinmarket_client import (
     joinmarket_parse_round_events,
     joinmarket_wallet_addresses,
 )
+from cj_process.producer_manifest import (
+    load_producer_label_manifest,
+    producer_label_manifest_engine,
+)
 # Re-exported so process_experiment and tests keep addressing them on this module.
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_files,
@@ -2495,6 +2499,12 @@ def fix_coordinator_wallet_addresses(cjtx_stats):
 
 def detect_mix_protocol(base_path):
     """Detect the mixing protocol of an experiment from the raw client artifacts it kept."""
+    manifest_engine = producer_label_manifest_engine(os.path.join(base_path, 'data'))
+    if manifest_engine == 'joinmarket':
+        return MIX_PROTOCOL.JOINMARKET
+    if manifest_engine == 'wasabi':
+        return MIX_PROTOCOL.WASABI2
+
     if find_joinmarket_client_log_files(base_path) or find_joinmarket_round_events_file(base_path):
         return MIX_PROTOCOL.JOINMARKET
     return MIX_PROTOCOL.WASABI2
@@ -2764,11 +2774,56 @@ def process_experiment(args):
         coinjoin_log_files = []
         joinmarket_log_files = find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
         joinmarket_round_events_file = find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
-        if joinmarket_log_files:
+        producer_manifest = load_producer_label_manifest(
+            os.path.join(WASABIWALLET_DATA_DIR, 'data')
+        )
+        manifest_engine = producer_manifest.get('engine') if producer_manifest is not None else None
+        incomplete_joinmarket_manifest = (
+            is_joinmarket
+            and manifest_engine == 'joinmarket'
+            and producer_manifest.get('complete') is False
+        )
+        if incomplete_joinmarket_manifest:
+            logger.warning(
+                'JoinMarket producer label manifest is incomplete (%s); '
+                'round events are not authoritative, falling back to legacy client logs.',
+                producer_manifest.get('reason') or 'no reason recorded',
+            )
+        if not is_joinmarket:
+            # A producer manifest is authoritative for protocol selection. In
+            # particular, stale JoinMarket artifacts must not override Wasabi.
+            cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
+            )
+            if not coinjoin_log_files:
+                cjtx_stats['rounds'] = {'no_round': []}
+        elif manifest_engine == 'joinmarket' and not incomplete_joinmarket_manifest:
+            # Current JoinMarket runs declare one authoritative, integrity-checked
+            # round-event source. Client logs remain only a legacy fallback.
+            cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB
+            )
+        elif incomplete_joinmarket_manifest:
+            # An incomplete producer capture makes its round events unusable.
+            # Client logs are the only permitted fallback on this path.
+            if not joinmarket_log_files:
+                raise ValueError(
+                    'JoinMarket producer label manifest is incomplete and no usable '
+                    'JoinMarket client logs are available'
+                )
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
             )
-            if not cjtx_stats['coinjoins'] and joinmarket_round_events_file:
+            cjtx_stats['rounds'] = {'no_round': []}
+        elif joinmarket_log_files:
+            cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
+            )
+            if (
+                not cjtx_stats['coinjoins']
+                and joinmarket_round_events_file
+                and producer_manifest is None
+            ):
                 logging.info('JoinMarket client logs contained no coinjoins; using round-event labels instead.')
                 cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
             if 'rounds' not in cjtx_stats:
@@ -2776,11 +2831,9 @@ def process_experiment(args):
         elif joinmarket_round_events_file:
             cjtx_stats['coinjoins'], cjtx_stats['rounds'] = joinmarket_parse_round_events(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
         else:
-            cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
-                WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
+            raise ValueError(
+                'No usable JoinMarket client logs or round-event labels are available'
             )
-            if not coinjoin_log_files:
-                cjtx_stats['rounds'] = {'no_round': []}
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)

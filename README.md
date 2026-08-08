@@ -210,10 +210,20 @@ transaction's `mine_time` is a fallback). The referenced transaction and its
 inputs must be present in the exported raw transaction database, so this path
 never queries a live Bitcoin node.
 
-Usable `data/jcs-*/joinmarket/jmwalletd.log` client logs take precedence. If
-they are absent or contain no detected CoinJoins, extraction falls back to the
-round-event file; `joinmarket_round_events.json` directly under the experiment
-directory is accepted as well.
+For current runs whose `data/coinjoin_label_manifest.json` declares a complete
+JoinMarket capture, that manifest is authoritative. It must name exactly one
+`data/joinmarket_round_events.json` source whose size and SHA-256 match the
+manifest; the analyzer also requires its parsed confirmed-transaction count to match
+`positive_count`. Client logs are ignored as a source of CoinJoin txids on this
+path. When a JoinMarket manifest explicitly declares an incomplete capture, the
+analyzer warns that its round events are not authoritative and falls back to
+usable client logs. A manifest for another or unknown engine does not override
+JoinMarket client-log discovery. Runs from older emulator versions without a
+manifest remain supported: usable
+`data/jcs-*/joinmarket/jmwalletd.log` files take precedence, and extraction falls
+back to the round-event file when those logs are absent or contain no detected
+CoinJoins. The legacy compatibility location
+`joinmarket_round_events.json` directly under the experiment is also accepted.
 
 The extraction process creates the following files: 
   * ```coinjoin_tx_info.json``` ... basic information about all detected coinjoins, mapping of all wallets to their coins, started rounds, etc.. Used for subsequent analysis.
