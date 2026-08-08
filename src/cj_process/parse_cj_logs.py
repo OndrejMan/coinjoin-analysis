@@ -67,6 +67,10 @@ MAX_NUM_DISPLAY_UTXO = 1000
 GLOBAL_IMG_SUFFIX = '.3'
 
 
+class MissingBlockDataError(RuntimeError):
+    """Raised when the run directory carries no fullnode block data to time coins by."""
+
+
 # colors used for different wallet clusters. Avoid following colors : 'red' (used for cjtx)
 COLORS = ['darkorange', 'green', 'lightblue', 'gray', 'aquamarine', 'darkorchid1', 'cornsilk3', 'chocolate',
           'deeppink1', 'cadetblue', 'darkgreen', 'burlywood4', 'cyan', 'darkgray', 'darkslateblue', 'dodgerblue4',
@@ -2333,10 +2337,23 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
         # Sometimes, all_tx_db is not complete for all logged coinjoins
         # Create artificial record for some future time
-        highest_known_mine_time = max([all_tx_db[txid]['mine_time'] for txid in all_tx_db.keys()])
-        datetime_obj = datetime.strptime(highest_known_mine_time, "%Y-%m-%d %H:%M:%S.%f")
-        datetime_obj = datetime_obj + timedelta(minutes=10)
-        highest_known_mine_time_next = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        highest_known_mine_time_next = None
+        if all_tx_db:
+            highest_known_mine_time = max([all_tx_db[txid]['mine_time'] for txid in all_tx_db.keys()])
+            datetime_obj = datetime.strptime(highest_known_mine_time, "%Y-%m-%d %H:%M:%S.%f")
+            datetime_obj = datetime_obj + timedelta(minutes=10)
+            highest_known_mine_time_next = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        def synthetic_time_for(owner, unmatched_coin):
+            """Time a coin whose block is missing, refusing to guess with no blocks at all."""
+            if highest_known_mine_time_next is None:
+                raise MissingBlockDataError(
+                    f'Wallet "{owner}" holds coin {unmatched_coin.get("txid", "<no txid>")} but '
+                    f'the transaction database is empty, so there is no block time to derive a '
+                    f'synthetic one from. Expected "block_*.json" exports under '
+                    f'"{os.path.join(base_path, "data", "btc-node")}".'
+                )
+            return highest_known_mine_time_next
 
         # Update coins with information about their lifetime information
         for wallet_name in wallets_coins_all.keys():
@@ -2347,14 +2364,14 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
                 else:
                     # Synthetic block info in case of missing block
                     coin['block_hash'] = 'synthetic_block'
-                    coin['create_time'] = highest_known_mine_time_next
+                    coin['create_time'] = synthetic_time_for(wallet_name, coin)
 
                 if 'spentBy' in coin.keys():
                     if coin['spentBy'] in all_tx_db.keys():
                         coin['destroy_time'] = all_tx_db[coin['spentBy']]['mine_time']
                     else:
                         # Synthetic destroy time in case of missing block
-                        coin['destroy_time'] = highest_known_mine_time_next
+                        coin['destroy_time'] = synthetic_time_for(wallet_name, coin)
 
 
         # Serialize parsed coins for all wallets into 'serialized_annonymity.json' file
@@ -2518,8 +2535,25 @@ def load_rawtx_database(base_tx_path):
 
 
 def load_tx_database_from_btccore(base_tx_path):
+    """Load every transaction the Bitcoin fullnode exported as ``block_*.json``.
+
+    :raises MissingBlockDataError: if the export directory is absent or holds no blocks
+    """
     tx_db = {}
+    if not os.path.isdir(base_tx_path):
+        raise MissingBlockDataError(
+            f'No Bitcoin fullnode block exports found: "{base_tx_path}" does not exist. '
+            f'The run directory is incomplete - the emulation most likely did not finish '
+            f'exporting btc-node data. Re-run the emulation instead of analyzing this run.'
+        )
     files = list_files(base_tx_path, '.json', 'block_')
+    if not files:
+        raise MissingBlockDataError(
+            f'No Bitcoin fullnode block exports found: "{base_tx_path}" contains no '
+            f'"block_*.json" file. The run directory is incomplete - the emulation most '
+            f'likely did not finish exporting btc-node data. Re-run the emulation instead '
+            f'of analyzing this run.'
+        )
     for tx_file in files:  # Each file corresponds to whole block - may be multiple transactions
         print(f'Loading from block file {tx_file}')
         with (open(tx_file, "r") as file):
