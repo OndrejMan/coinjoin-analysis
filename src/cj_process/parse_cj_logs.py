@@ -2493,6 +2493,36 @@ def fix_coordinator_wallet_addresses(cjtx_stats):
     return cjtx_stats
 
 
+def detect_mix_protocol(base_path):
+    """Detect the mixing protocol of an experiment from the raw client artifacts it kept."""
+    if find_joinmarket_client_log_files(base_path) or find_joinmarket_round_events_file(base_path):
+        return MIX_PROTOCOL.JOINMARKET
+    return MIX_PROTOCOL.WASABI2
+
+
+def load_mix_protocol(cjtx_stats, base_path):
+    """Recover the protocol an already parsed experiment was collected with.
+
+    ``coinjoin_tx_info.json`` records it since the raw JoinMarket logs it was detected
+    from need not be kept next to it. Files written before that fall back to detection,
+    which is what they were analyzed with anyway.
+    """
+    stored_protocol = cjtx_stats.get('mix_protocol')
+    if stored_protocol is None:
+        detected_protocol = detect_mix_protocol(base_path)
+        logger.info('No mix_protocol recorded in coinjoin_tx_info.json, detected %s from %s',
+                    detected_protocol.value, base_path)
+        return detected_protocol
+
+    try:
+        return MIX_PROTOCOL(stored_protocol)
+    except ValueError as exc:
+        raise ValueError(
+            f'coinjoin_tx_info.json in {base_path} records an unknown mix_protocol '
+            f'{stored_protocol!r}'
+        ) from exc
+
+
 def load_prison_data(cjtx_stats, base_path):
     prison_file = find_wasabi_prison_file(base_path)
     items_in_prison = 0
@@ -2680,16 +2710,9 @@ def optimize_txvalue_info(cjtx_stats):
 
 
 def process_experiment(args):
-    mix_protocol = MIX_PROTOCOL.WASABI2
     base_path = args[0]
     save_figs = args[1]
     WASABIWALLET_DATA_DIR = base_path
-    is_joinmarket = bool(
-        find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
-        or find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
-    )
-    if is_joinmarket:
-        mix_protocol = MIX_PROTOCOL.JOINMARKET
     SM.print(f'INPUT PATH: {base_path}')
     save_file = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info.json")
     save_file_stats = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info_stats.json")
@@ -2698,13 +2721,23 @@ def process_experiment(args):
         with open(save_file, "r") as file:
             cjtx_stats = json.load(file)
 
+        # The raw client logs the protocol was detected from are not required by this
+        # action, so the protocol recorded during collection is authoritative here.
+        mix_protocol = load_mix_protocol(cjtx_stats, WASABIWALLET_DATA_DIR)
+        is_joinmarket = mix_protocol == MIX_PROTOCOL.JOINMARKET
+        needs_save = cjtx_stats.get('mix_protocol') != mix_protocol.value
+        cjtx_stats['mix_protocol'] = mix_protocol.value
+
         # Build mapping between address and controlling wallet
         if 'address_wallet_mapping' not in cjtx_stats.keys():
             cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
-            if not op.READ_ONLY_COINJOIN_TX_INFO:
-                with open(save_file, "w") as file:
-                    file.write(json.dumps(dict(sorted(cjtx_stats.items())), indent=4))
+            needs_save = True
+        if needs_save and not op.READ_ONLY_COINJOIN_TX_INFO:
+            with open(save_file, "w") as file:
+                file.write(json.dumps(dict(sorted(cjtx_stats.items())), indent=4))
     else:
+        mix_protocol = detect_mix_protocol(WASABIWALLET_DATA_DIR)
+        is_joinmarket = mix_protocol == MIX_PROTOCOL.JOINMARKET
         # Load transaction info from serialized files
         RAW_TXS_DB = {}
         if op.LOAD_TXINFO_FROM_DOCKER_FILES:
@@ -2721,6 +2754,9 @@ def process_experiment(args):
 
         # Load wallets info
         cjtx_stats = {}
+        # Recorded so later analyze_only runs do not have to rediscover the protocol from
+        # raw client logs, which they no longer require to be present.
+        cjtx_stats['mix_protocol'] = mix_protocol.value
         cjtx_stats['wallets_info'], cjtx_stats['wallets_coins'] = (
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
