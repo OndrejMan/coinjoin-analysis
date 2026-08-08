@@ -87,7 +87,7 @@ def joinmarket_wallet_addresses(wallet_path: str):
     return addresses
 
 
-def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
+def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict, allow_rpc: bool = True):
     """
     Obtain information about coinjoins from collated logs from all separate clients
     :param base_path: base path where docker client images are stored

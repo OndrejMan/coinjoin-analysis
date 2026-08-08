@@ -209,7 +209,7 @@ def print_round_logs(filename, round_id):
     print('**************************************')
 
 
-def get_input_address(txid, txid_in_out, raw_txs: dict = {}, allow_rpc: bool = True):
+def get_input_address(txid, txid_in_out, raw_txs: dict, allow_rpc: bool = True):
     """
     Returns address which was used in transaction given by 'txid' as 'txid_in_out' output index
     :param txid: transaction id to read input address from
@@ -1899,7 +1899,7 @@ def build_address_wallet_mapping(cjtx_stats):
     return address_wallet_mapping
 
 
-def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}, allow_rpc: bool = True):
+def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict, allow_rpc: bool = True):
     print('Parsing coinjoin-relevant data from coordinator logs {}...'.format(coord_input_file), end='')
     if PRE_2_0_4_VERSION:
         regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Created round with params: MaxSuggestedAmount:'([0-9\.]+)' BTC?"
