@@ -2332,8 +2332,12 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
                 # Wallet coins (as obtained by 'listcoins' RPC)
                 with open(os.path.join(target_base_path, 'coins.json'), "r") as file:
                     wallet_coins = load_wallet_export(file)
-                    if isinstance(wallet_coins, str) and (wallet_coins.lower() == 'timeout' or wallet_coins.lower() == 'this method is not available in joinmarket'):
-                        logging.error(f'Loading wallet keys failed with \"{wallet_coins}\" for \"{target_base_path}\"')
+                    coins_unavailable = isinstance(wallet_coins, str) and (
+                        wallet_coins.lower() == 'timeout'
+                        or wallet_coins.lower() == 'this method is not available in joinmarket'
+                    )
+                    if coins_unavailable:
+                        logging.error(f'Loading wallet coins failed with \"{wallet_coins}\" for \"{target_base_path}\"')
                         wallets_coins_all[wallet_name] = {}
                     else:
                         for item in wallet_coins:
@@ -2347,13 +2351,12 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
                 # Wallet addresses (as obtained by 'listkeys' RPC) - now extracted from 'keys.json' file
                 with open(os.path.join(target_base_path, 'keys.json'), "r") as file:
                     wallet_keys = load_wallet_export(file)
-                    timout_detected = False
-                    if isinstance(wallet_coins, str) and (wallet_coins.lower() == 'timeout' or wallet_coins.lower() == 'this method is not available in joinmarket'):
-                        timout_detected = True
-                    if isinstance(wallet_keys, str) and (wallet_keys.lower() == 'timeout' or wallet_keys.lower() == 'this method is not available in joinmarket'):
-                        timout_detected = True
+                    keys_unavailable = isinstance(wallet_keys, str) and (
+                        wallet_keys.lower() == 'timeout'
+                        or wallet_keys.lower() == 'this method is not available in joinmarket'
+                    )
 
-                    if timout_detected:
+                    if keys_unavailable:
                         # JoinMarket has no 'listkeys' RPC; recover ownership from the
                         # wallet's own artifacts instead of leaving it unattributed.
                         recovered_addresses = (

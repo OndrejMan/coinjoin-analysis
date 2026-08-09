@@ -182,3 +182,13 @@ def test_client_that_died_during_export_aborts_collection(tmp_path):
 
     with pytest.raises(WalletExportError, match=r'coins\.json is empty or damaged'):
         obtain_wallets_info(str(tmp_path), False, True, {})
+
+
+def test_unavailable_coins_export_keeps_valid_wallet_keys(tmp_path):
+    keys = json.dumps([{'address': 'bcrt1qnormal', 'fullKeyPath': "84'/0'/0'/1/0"}])
+    write_wallet(tmp_path, '000', keys=keys, coins=json.dumps('timeout'))
+
+    wallets_info, wallets_coins = obtain_wallets_info(str(tmp_path), False, True, {})
+
+    assert list(wallets_info['wallet-000']) == ['bcrt1qnormal']
+    assert wallets_coins['wallet-000'] == {}
