@@ -176,6 +176,17 @@ def test_empty_or_invalid_coins_export_does_not_abort_collection(tmp_path, caplo
 
 
 @pytest.mark.parametrize('invalid_json', ['', '{invalid'])
+def test_invalid_coins_export_keeps_valid_wallet_keys(tmp_path, invalid_json):
+    keys = json.dumps([{'address': 'bcrt1qnormal', 'fullKeyPath': "84'/0'/0'/1/0"}])
+    write_wallet(tmp_path, '000', keys=keys, coins=invalid_json)
+
+    wallets_info, wallets_coins = obtain_wallets_info(str(tmp_path), False, True, {})
+
+    assert list(wallets_info['wallet-000']) == ['bcrt1qnormal']
+    assert wallets_coins['wallet-000'] == {}
+
+
+@pytest.mark.parametrize('invalid_json', ['', '{invalid'])
 def test_empty_or_invalid_keys_export_still_recovers_joinmarket_addresses(tmp_path, caplog, invalid_json):
     unspent = {'utxos': [{'address': 'bcrt1qrecovered', 'path': "m/84'/1'/0'/0/0"}]}
     write_wallet(
