@@ -93,15 +93,23 @@ def joinmarket_wallet_addresses(wallet_path: str):
                 if address:
                     addresses.setdefault(address, {'address': address, 'path': utxo.get('path')})
 
-    for log_file in _find_joinmarket_log_files(wallet_path, include_wallet_logs=True):
+    log_files = _find_joinmarket_log_files(wallet_path, include_wallet_logs=True)
+    if not log_files:
+        logger.warning(
+            'No JoinMarket log files found under %s; ownership can only be recovered '
+            'from unspent coins, so coins this wallet already spent stay unattributed',
+            wallet_path,
+        )
+
+    for log_file in log_files:
         with open(log_file, 'r', errors='replace') as file:
             log_text = file.read()
-            for match in JOINMARKET_OWN_ADDRESS_PATTERN.finditer(log_text):
-                address = match.group('address')
-                addresses.setdefault(address, {'address': address, 'path': match.group('path')})
-            for match in JOINMARKET_MAKER_OUTPUTS_PATTERN.finditer(log_text):
-                for address in (match.group('cjaddr'), match.group('change')):
-                    addresses.setdefault(address, {'address': address})
+        for match in JOINMARKET_OWN_ADDRESS_PATTERN.finditer(log_text):
+            address = match.group('address')
+            addresses.setdefault(address, {'address': address, 'path': match.group('path')})
+        for match in JOINMARKET_MAKER_OUTPUTS_PATTERN.finditer(log_text):
+            for address in (match.group('cjaddr'), match.group('change')):
+                addresses.setdefault(address, {'address': address})
 
     if not addresses:
         logger.warning('No JoinMarket wallet addresses recovered from %s', wallet_path)
