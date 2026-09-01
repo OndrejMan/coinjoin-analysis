@@ -204,11 +204,13 @@ docker compose run --rm emulation-process
 Set `CJ_RUNS` to mount a different host-side `runs/` directory.
 
 JoinMarket emulator runs may provide round labels in
-`data/joinmarket_round_events.json`. Each accepted event needs a `txid` and a
-timestamp (`broadcast_time`, `timestamp`, or `round_start_time`; the
-transaction's `mine_time` is a fallback). The referenced transaction and its
-inputs must be present in the exported raw transaction database, so this path
-never queries a live Bitcoin node.
+`data/joinmarket_round_events.json`. Current events need a globally unique
+`export_round_id`, exactly one entry in `destination_matches` (containing `txid`
+and `block_height`), and a timestamp
+(`broadcast_time`, `timestamp`, or `round_start_time`; the transaction's
+`mine_time` is a fallback). The referenced transaction and its inputs must be
+present in the exported raw transaction database, so this path never queries a
+live Bitcoin node.
 
 For current runs whose `data/coinjoin_label_manifest.json` declares a complete
 JoinMarket capture, that manifest is authoritative. It must name exactly one
