@@ -208,9 +208,10 @@ JoinMarket emulator runs may provide round labels in
 `export_round_id`, exactly one entry in `destination_matches` (containing `txid`
 and `block_height`), and a timestamp
 (`broadcast_time`, `timestamp`, or `round_start_time`; the transaction's
-`mine_time` is a fallback). The referenced transaction and its inputs must be
-present in the exported raw transaction database, so this path never queries a
-live Bitcoin node.
+`mine_time` is a fallback). Events with multiple destination matches are
+ambiguous and make a manifest-backed capture unavailable. The referenced
+transaction and its inputs must be present in the exported raw transaction
+database, so this path never queries a live Bitcoin node.
 
 For current runs whose `data/coinjoin_label_manifest.json` declares a complete
 JoinMarket capture, that manifest is authoritative. It must name exactly one
