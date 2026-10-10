@@ -4,11 +4,14 @@ The records have the same shape as the 'postmix' section parse_dumplings.py buil
 mainnet data, so analyze_input_out_liquidity() treats emulated and mainnet runs alike.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from cj_process.cj_analysis import (
     btc_to_sats,
+    extract_txid_from_inout_string,
+    get_input_name_string,
     get_output_name_string,
 )
 
@@ -22,6 +25,12 @@ class Outpoint:
 
     txid: str
     index: int
+
+    @classmethod
+    def from_name(cls, name: str) -> 'Outpoint':
+        """Parse the 'vout_<txid>_<index>' reference used in coinjoin_tx_info.json."""
+        txid, index = extract_txid_from_inout_string(name)
+        return cls(txid, int(index))
 
     @property
     def name(self) -> str:
@@ -58,6 +67,11 @@ def _coinjoin_output(coinjoins: dict[str, Record], outpoint: Outpoint) -> Record
     if outpoint.txid not in coinjoins:
         return None
     return coinjoins[outpoint.txid]['outputs'].get(str(outpoint.index))
+
+
+def _coinjoin_outputs(coinjoins: dict[str, Record]) -> Iterator[Record]:
+    """Every output record of every coinjoin."""
+    return (output for record in coinjoins.values() for output in record['outputs'].values())
 
 
 def _spent_output(
@@ -97,3 +111,27 @@ def build_emulation_postmix(coinjoins: dict[str, Record], raw_txs_db: dict[str, 
         for tx in transactions.values()
         if tx.txid not in coinjoins and tx.spends_coinjoin_output(coinjoins)
     }
+
+
+def _reference_remixes(coinjoins: dict[str, Record]) -> None:
+    """Point each coinjoin output spent by another coinjoin to that coinjoin."""
+    for output in _coinjoin_outputs(coinjoins):
+        spend_by_txid = output.get('spend_by_txid')
+        if spend_by_txid is not None:
+            spending_txid, index = spend_by_txid
+            output['spend_by_tx'] = get_input_name_string(spending_txid, index)
+
+
+def _reference_postmix_spends(coinjoins: dict[str, Record], postmix: dict[str, Record]) -> None:
+    """Point each coinjoin output spent outside the mix to its postmix transaction."""
+    for postmix_txid, record in postmix.items():
+        for index, postmix_input in record['inputs'].items():
+            coinjoin_output = _coinjoin_output(coinjoins, Outpoint.from_name(postmix_input['spending_tx']))
+            if coinjoin_output is not None:
+                coinjoin_output['spend_by_tx'] = get_input_name_string(postmix_txid, index)
+
+
+def assign_emulation_spend_references(coinjoins: dict[str, Record], postmix: dict[str, Record]) -> None:
+    """Fill in 'spend_by_tx' for emulated coinjoin outputs so analyze_input_out_liquidity() can classify them."""
+    _reference_remixes(coinjoins)
+    _reference_postmix_spends(coinjoins, postmix)

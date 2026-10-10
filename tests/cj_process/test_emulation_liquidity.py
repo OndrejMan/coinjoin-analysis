@@ -5,8 +5,15 @@ remixed outputs must become MIX_REMIX and outputs spent outside the mix MIX_LEAV
 not MIX_STAY.
 """
 
-from cj_process.emulation_postmix import build_emulation_postmix
-
+from cj_process.cj_analysis import (
+    analyze_input_out_liquidity,
+    compute_link_between_inputs_and_outputs,
+)
+from cj_process.cj_structs import MIX_EVENT_TYPE, MIX_PROTOCOL
+from cj_process.emulation_postmix import (
+    assign_emulation_spend_references,
+    build_emulation_postmix,
+)
 
 CJ_A = "a" * 64
 CJ_B = "b" * 64
@@ -73,6 +80,15 @@ def raw_block_txs():
     }
 
 
+def classify(tmp_path):
+    coinjoins = emulated_coinjoins()
+    postmix = build_emulation_postmix(coinjoins, raw_block_txs())
+    compute_link_between_inputs_and_outputs(coinjoins, list(coinjoins))
+    assign_emulation_spend_references(coinjoins, postmix)
+    analyze_input_out_liquidity(str(tmp_path), coinjoins, postmix, {}, MIX_PROTOCOL.WASABI2)
+    return coinjoins, postmix
+
+
 def test_postmix_contains_only_spends_of_coinjoin_outputs():
     postmix = build_emulation_postmix(emulated_coinjoins(), raw_block_txs())
 
@@ -85,3 +101,23 @@ def test_postmix_contains_only_spends_of_coinjoin_outputs():
     }
     assert postmix[POSTMIX]["outputs"]["0"] == {"value": 99000, "address": "external"}
 
+
+def test_outputs_are_classified_by_their_spender(tmp_path):
+    coinjoins, _ = classify(tmp_path)
+    outputs = coinjoins[CJ_A]["outputs"]
+
+    assert outputs["0"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_REMIX.name
+    assert outputs["1"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_LEAVE.name
+    assert outputs["1"]["burn_time"] == 30 * 60
+    assert outputs["2"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_STAY.name
+    assert {output["mix_event_type"] for output in coinjoins[CJ_B]["outputs"].values()} == {
+        MIX_EVENT_TYPE.MIX_STAY.name
+    }
+
+
+def test_inputs_keep_their_enter_and_remix_classification(tmp_path):
+    coinjoins, _ = classify(tmp_path)
+
+    assert coinjoins[CJ_A]["inputs"]["0"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_ENTER.name
+    assert coinjoins[CJ_B]["inputs"]["0"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_REMIX.name
+    assert coinjoins[CJ_B]["inputs"]["1"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_ENTER.name
