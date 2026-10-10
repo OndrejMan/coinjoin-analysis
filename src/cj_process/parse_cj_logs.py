@@ -57,6 +57,7 @@ from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
 import emulation.anonymity_score as anonymity_score
 import cj_process.cj_analysis as als
+from cj_process import emulation_postmix
 from cj_process.cj_analysis import MIX_PROTOCOL
 from cj_process.cj_analysis import CJ_LOG_TYPES
 import logging
@@ -2860,6 +2861,9 @@ def process_experiment(args):
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
+
+        # Transactions spending coinjoin outputs outside the mix (MIX_LEAVE)
+        cjtx_stats['postmix'] = emulation_postmix.build_emulation_postmix(cjtx_stats['coinjoins'], RAW_TXS_DB)
 
         # Assume coordinator for all 32B addresses
         if op.ASSUME_COORDINATOR_WALLET:
