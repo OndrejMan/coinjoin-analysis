@@ -2953,6 +2953,7 @@ def process_experiment(args):
     als.remove_link_between_inputs_and_outputs(cjtx_stats['coinjoins'])
     als.compute_link_between_inputs_and_outputs(cjtx_stats['coinjoins'],
                                             [cjtxid for cjtxid in cjtx_stats['coinjoins'].keys()])
+    emulation_postmix.assign_emulation_spend_references(cjtx_stats['coinjoins'], cjtx_stats.get('postmix', {}))
     als.analyze_input_out_liquidity(base_path, cjtx_stats['coinjoins'], cjtx_stats.get('postmix', {}), cjtx_stats.get('premix', {}), mix_protocol)
 
     if not op.READ_ONLY_COINJOIN_TX_INFO:
