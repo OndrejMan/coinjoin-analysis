@@ -5,11 +5,14 @@ remixed outputs must become MIX_REMIX and outputs spent outside the mix MIX_LEAV
 not MIX_STAY.
 """
 
+import pytest
+
 from cj_process.cj_analysis import (
     analyze_input_out_liquidity,
     compute_link_between_inputs_and_outputs,
 )
 from cj_process.cj_structs import MIX_EVENT_TYPE, MIX_PROTOCOL
+from cj_process.cj_visualize import plot_mix_liquidity
 from cj_process.emulation_postmix import (
     assign_emulation_spend_references,
     build_emulation_postmix,
@@ -121,3 +124,19 @@ def test_inputs_keep_their_enter_and_remix_classification(tmp_path):
     assert coinjoins[CJ_A]["inputs"]["0"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_ENTER.name
     assert coinjoins[CJ_B]["inputs"]["0"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_REMIX.name
     assert coinjoins[CJ_B]["inputs"]["1"]["mix_event_type"] == MIX_EVENT_TYPE.MIX_ENTER.name
+
+
+@pytest.mark.parametrize(
+    ("cutoff", "expected"),
+    [(1800, [300000, 400000]), (3600, [200000, 300000])],
+)
+def test_liquidity_cutoff_uses_exported_spending_time(tmp_path, cutoff, expected):
+    coinjoins, postmix = classify(tmp_path)
+
+    result = plot_mix_liquidity(
+        "emulation", {"coinjoins": coinjoins, "postmix": postmix},
+        (0, 0, 0, 0, 0), {}, 0, None, leave_time_cutoff_seconds=cutoff,
+    )
+
+    assert result[0] == [200000, 300000]
+    assert result[3] == expected
