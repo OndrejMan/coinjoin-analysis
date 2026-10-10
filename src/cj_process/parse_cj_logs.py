@@ -1604,12 +1604,14 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
         time_liquidity = {}
         cjvis.plot_inputs_type_ratio(f'{experiment_name}', cjtx_stats, 0, cjplt.ax_inputs_type_value_ratio,True, False)
         ax2 = cjplt.ax_inputs_type_value_ratio.twinx()
-        cjvis.plot_mix_liquidity(f'{experiment_name}', cjtx_stats, (0, 0, 0, 0, 0), time_liquidity, 0, ax2)
+        cjvis.plot_mix_liquidity(f'{experiment_name}', cjtx_stats, (0, 0, 0, 0, 0), time_liquidity, 0, ax2,
+                                 op.LIQUIDITY_LEAVE_TIME_CUTOFF_SECONDS)
 
     if cjplt.ax_inputs_type_num_ratio:
         cjvis.plot_inputs_type_ratio(f'{experiment_name}', cjtx_stats, 0, cjplt.ax_inputs_type_num_ratio, False, True)
         ax2 = cjplt.ax_inputs_type_num_ratio.twinx()
-        cjvis.plot_mix_liquidity(f'{experiment_name}', cjtx_stats, (0, 0, 0, 0, 0), time_liquidity, 0, ax2)
+        cjvis.plot_mix_liquidity(f'{experiment_name}', cjtx_stats, (0, 0, 0, 0, 0), time_liquidity, 0, ax2,
+                                 op.LIQUIDITY_LEAVE_TIME_CUTOFF_SECONDS)
 
     return analysis_stats
 
@@ -3472,6 +3474,9 @@ class EmulParseOptions:
     GENERATE_COINJOIN_GRAPH_BLIND = False
     GENERATE_COINJOIN_GRAPH_LINEAR = False
     ASSUME_COORDINATOR_WALLET = True
+    # Postmix spends within this many seconds after their coinjoin are `fast` leaving liquidity. An emulated
+    # run lasts hours, so the one-month window used for mainnet data would classify every spend as fast.
+    LIQUIDITY_LEAVE_TIME_CUTOFF_SECONDS = 3600
 
     RAW_TXS_DB = {}
     NUM_THREADS = 100
