@@ -25,6 +25,8 @@ from cj_process import cj_visualize as cjvis
 # SLOT_WIDTH_SECONDS = 3600 * 24 * 7  # week
 #SLOT_WIDTH_SECONDS = 3600 * 24  # day
 SLOT_WIDTH_SECONDS = 3600   # hour
+# Outputs spent outside the mix within this time after their coinjoin count as `fast` leaving liquidity
+MIX_LEAVE_TIME_CUTOFF_SECONDS = 30 * 24 * 3600  # 1 month
 
 LEGEND_FONT_SIZE = 8
 #LEGEND_FONT_SIZE = 'small'
@@ -1491,7 +1493,8 @@ def plot_inputs_type_ratio(mix_id: str, data: dict, initial_cj_index: int, ax, a
     return input_types
 
 
-def plot_mix_liquidity(mix_id: str, data: dict, initial_liquidity, time_liquidity: dict, initial_cj_index: int, ax):
+def plot_mix_liquidity(mix_id: str, data: dict, initial_liquidity, time_liquidity: dict, initial_cj_index: int, ax,
+                       leave_time_cutoff_seconds: int = MIX_LEAVE_TIME_CUTOFF_SECONDS):
     coinjoins = data['coinjoins']
     sorted_cj_time = als.sort_coinjoins(coinjoins, als.SORT_COINJOINS_BY_RELATIVE_ORDER)
 
@@ -1517,8 +1520,7 @@ def plot_mix_liquidity(mix_id: str, data: dict, initial_liquidity, time_liquidit
                                     if coinjoins[cjtx['txid']]['outputs'][index]['mix_event_type'] == MIX_EVENT_TYPE.MIX_STAY.name])
                                for cjtx in sorted_cj_time]
 
-    INTERVAL_LENGTH = 3 * 30 * 24 * 3600  # 3 months == 3 * 30 * 24 * 3600
-    INTERVAL_LENGTH = 30 * 24 * 3600  # 1 month == * 30 * 24 * 3600
+    INTERVAL_LENGTH = leave_time_cutoff_seconds
     # Outputs leaving mix `fast` after its mixing (within 0-INTERVAL_LENGTH seconds)
     mix_leave_timecutoff_before = [sum([coinjoins[cjtx['txid']]['outputs'][index]['value'] for index in coinjoins[cjtx['txid']]['outputs'].keys()
                                     if coinjoins[cjtx['txid']]['outputs'][index]['mix_event_type'] == MIX_EVENT_TYPE.MIX_LEAVE.name and
