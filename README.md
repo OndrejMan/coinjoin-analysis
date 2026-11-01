@@ -38,8 +38,8 @@ default. Set `BITCOIN_CLI_PATH` when the executable is installed elsewhere:
 export BITCOIN_CLI_PATH=/opt/bitcoin/bin/bitcoin-cli
 ```
 
-The `collect_docker` workflow reads already decoded `data/btc-node/block_*.json`
-files and does not require `bitcoin-cli`.
+The `collect_docker` workflow recursively reads already decoded
+`data/btc-node/**/block_*.json` files and does not require `bitcoin-cli`.
 
 ### Tests
 

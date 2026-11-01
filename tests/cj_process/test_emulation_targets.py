@@ -5,6 +5,7 @@ import pytest
 from cj_process.emulation_targets import (
     ACTION_REQUIREMENTS,
     ANALYSIS_INPUT,
+    BLOCK_EXPORTS,
     DOCKER_DATA,
     EXPERIMENT_MARKERS,
     EmulationTargetError,
@@ -15,9 +16,13 @@ from cj_process.emulation_targets import (
 )
 
 
-def test_requirement_describes_directories_and_files():
+def test_requirement_describes_directories_files_and_globs():
     assert DOCKER_DATA.description == "<experiment>/data/"
     assert ANALYSIS_INPUT.description == "<experiment>/coinjoin_tx_info.json"
+    assert BLOCK_EXPORTS.description == "<experiment>/data/btc-node/**/block_*.json"
+    assert BLOCK_EXPORTS.summary == (
+        "exported Bitcoin blocks under <experiment>/data/btc-node/**/block_*.json"
+    )
 
 
 def test_requirement_distinguishes_files_from_directories(tmp_path):
@@ -27,8 +32,19 @@ def test_requirement_distinguishes_files_from_directories(tmp_path):
     assert not DOCKER_DATA.is_satisfied_by(tmp_path)
 
 
-def test_every_action_requirement_is_a_known_marker():
-    known = set(EXPERIMENT_MARKERS)
+def test_glob_requirement_ignores_directories_matching_the_pattern(tmp_path):
+    block_exports = tmp_path / "data" / "btc-node"
+    (block_exports / "block_1.json").mkdir(parents=True)
+
+    assert not BLOCK_EXPORTS.is_satisfied_by(tmp_path)
+
+    (block_exports / "block_2.json").write_text("{}", encoding="utf-8")
+
+    assert BLOCK_EXPORTS.is_satisfied_by(tmp_path)
+
+
+def test_every_action_requirement_is_a_known_marker_or_block_export():
+    known = set(EXPERIMENT_MARKERS) | {BLOCK_EXPORTS}
     for requirements in ACTION_REQUIREMENTS.values():
         assert set(requirements) <= known
 

@@ -27,9 +27,33 @@ def test_target_path_must_contain_an_experiment(tmp_path, capsys):
 
 
 def test_target_path_accepts_an_experiment_data_directory(tmp_path):
-    (tmp_path / "experiment-1" / "data").mkdir(parents=True)
+    btc_node = tmp_path / "experiment-1" / "data" / "btc-node"
+    btc_node.mkdir(parents=True)
+    (btc_node / "block_0.json").write_text("{}", encoding="utf-8")
 
     arguments = parse_arguments(["--target-path", str(tmp_path)])
+
+    assert arguments.target_path == [str(tmp_path)]
+
+
+def test_collect_docker_requires_exported_bitcoin_blocks(tmp_path, capsys):
+    (tmp_path / "experiment-1" / "data").mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_arguments(["--action", "collect_docker", "--target-path", str(tmp_path)])
+
+    assert exc_info.value.code == 2
+    assert "collect_docker requires exported Bitcoin blocks" in capsys.readouterr().err
+
+
+def test_collect_docker_accepts_exported_bitcoin_blocks_recursively(tmp_path):
+    export_path = tmp_path / "experiment-1" / "data" / "btc-node" / "export"
+    export_path.mkdir(parents=True)
+    (export_path / "block_0.json").write_text("{}", encoding="utf-8")
+
+    arguments = parse_arguments(
+        ["--action", "collect_docker", "--target-path", str(tmp_path)]
+    )
 
     assert arguments.target_path == [str(tmp_path)]
 

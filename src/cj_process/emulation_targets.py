@@ -19,11 +19,15 @@ class Requirement:
     """One artifact an experiment must provide before an action can run."""
 
     path: str
+    glob: str = ''
     must_be_file: bool = False
+    label: str = ''
 
     @property
     def description(self) -> str:
         """Path of the artifact relative to a single experiment folder."""
+        if self.glob:
+            return f'<experiment>/{self.path}/**/{self.glob}'
         if self.must_be_file:
             return f'<experiment>/{self.path}'
         return f'<experiment>/{self.path}/'
@@ -31,16 +35,20 @@ class Requirement:
     @property
     def summary(self) -> str:
         """Human readable phrase used in error messages."""
-        return self.description
+        return f'{self.label} {self.description}'.strip()
 
     def is_satisfied_by(self, experiment: Path) -> bool:
         target = experiment / self.path
+        if self.glob:
+            return any(match.is_file() for match in target.rglob(self.glob))
         return target.is_file() if self.must_be_file else target.is_dir()
 
 
 DOCKER_DATA = Requirement('data')
 WALLET_WASABI = Requirement('WalletWasabi')
 ANALYSIS_INPUT = Requirement('coinjoin_tx_info.json', must_be_file=True)
+BLOCK_EXPORTS = Requirement('data/btc-node', glob='block_*.json',
+                            label='exported Bitcoin blocks under')
 
 # Any of these makes a subfolder recognizable as an experiment.
 EXPERIMENT_MARKERS = (DOCKER_DATA, WALLET_WASABI, ANALYSIS_INPUT)
@@ -48,7 +56,7 @@ EXPERIMENT_MARKERS = (DOCKER_DATA, WALLET_WASABI, ANALYSIS_INPUT)
 DEFAULT_ACTION = 'collect_docker'
 ACTION_REQUIREMENTS = {
     'collect_local': (WALLET_WASABI,),
-    'collect_docker': (DOCKER_DATA,),
+    'collect_docker': (DOCKER_DATA, BLOCK_EXPORTS),
     'analyze_only': (ANALYSIS_INPUT,),
 }
 
