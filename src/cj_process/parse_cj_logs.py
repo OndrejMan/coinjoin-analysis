@@ -11,7 +11,11 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
-from cj_process.emulation_targets import find_emulation_experiments, validate_emulation_target
+from cj_process.emulation_targets import (
+    EmulationTargetError,
+    find_emulation_experiments,
+    validate_emulation_targets,
+)
 from cj_process.joinmarket_client import (
     find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
@@ -3171,7 +3175,7 @@ def backup_log_files(target_path: str):
         logging.warning(f'Log file {log_file_path} does not found, not copied.')
 
 
-def parse_arguments(argv):
+def parse_arguments(argv, options=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action",
                         help="Action to performed. collect_local...from running instances; "
@@ -3181,7 +3185,7 @@ def parse_arguments(argv):
                         required=False)
     parser.add_argument("-tp", "--target-path",
                         help="Target path with experiment(s) to be processed.",
-                        action="append", metavar="PATH", type=validate_emulation_target,
+                        action="append", metavar="PATH",
                         required=False)
     parser.add_argument("-lc", "--load-config",
                         help="Load all configuration from file",
@@ -3192,7 +3196,22 @@ def parse_arguments(argv):
                         action="store", metavar="ENV_VARS",
                         required=False)
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if options is None:
+        options = EmulParseOptions()
+    options.set_args(args)
+    if options.target_path:
+        if options.LOAD_TXINFO_FROM_FILE:
+            effective_action = 'analyze_only'
+        elif options.LOAD_TXINFO_FROM_DOCKER_FILES:
+            effective_action = 'collect_docker'
+        else:
+            effective_action = 'collect_local'
+        try:
+            validate_emulation_targets(options.target_path, effective_action)
+        except EmulationTargetError as exc:
+            parser.error(str(exc))
+    return args
 
 
 class AnalysisType(Enum):
@@ -3420,8 +3439,7 @@ def main(argv=None):
     global op
     op = EmulParseOptions()
     # parse arguments, overwrite default settings if required
-    args = parse_arguments(argv)
-    op.set_args(args)
+    parse_arguments(argv, op)
 
     #
     # Analysis of single experiment

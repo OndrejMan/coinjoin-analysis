@@ -3,12 +3,15 @@ from pathlib import Path
 import pytest
 
 from cj_process.emulation_targets import (
+    ACTION_REQUIREMENTS,
     ANALYSIS_INPUT,
     DOCKER_DATA,
+    EXPERIMENT_MARKERS,
     EmulationTargetError,
     Requirement,
     collect_experiments,
     find_emulation_experiments,
+    validate_emulation_targets,
 )
 
 
@@ -22,6 +25,12 @@ def test_requirement_distinguishes_files_from_directories(tmp_path):
 
     assert not ANALYSIS_INPUT.is_satisfied_by(tmp_path)
     assert not DOCKER_DATA.is_satisfied_by(tmp_path)
+
+
+def test_every_action_requirement_is_a_known_marker():
+    known = set(EXPERIMENT_MARKERS)
+    for requirements in ACTION_REQUIREMENTS.values():
+        assert set(requirements) <= known
 
 
 def test_find_emulation_experiments_is_sorted_and_skips_unrelated_folders(tmp_path):
@@ -63,6 +72,28 @@ def test_collect_experiments_rejects_a_path_without_experiments(tmp_path):
 def test_find_emulation_experiments_reports_unreadable_paths(tmp_path):
     with pytest.raises(EmulationTargetError, match="Cannot inspect"):
         find_emulation_experiments(Path(tmp_path / "missing"))
+
+
+def test_validation_names_every_experiment_missing_an_artifact(tmp_path):
+    complete = tmp_path / "experiment-1"
+    (complete / "WalletWasabi").mkdir(parents=True)
+    (complete / "coinjoin_tx_info.json").write_text("{}", encoding="utf-8")
+    incomplete = tmp_path / "experiment-2"
+    (incomplete / "WalletWasabi").mkdir(parents=True)
+
+    with pytest.raises(EmulationTargetError) as exc_info:
+        validate_emulation_targets([str(tmp_path)], "analyze_only")
+
+    message = str(exc_info.value)
+    assert str(incomplete) in message
+    assert str(complete) not in message
+
+
+def test_unknown_action_is_not_silently_accepted(tmp_path):
+    (tmp_path / "experiment-1" / "data").mkdir(parents=True)
+
+    with pytest.raises(KeyError):
+        validate_emulation_targets([str(tmp_path)], "collect_everything")
 
 
 def test_requirements_are_hashable_value_objects():

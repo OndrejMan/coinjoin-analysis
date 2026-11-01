@@ -1,6 +1,11 @@
-"""Shared discovery of EmuCoinJoin experiment directories."""
+"""Discovery and validation of EmuCoinJoin experiment directories.
 
-import argparse
+A ``--target-path`` points at a folder whose one-level subfolders are the
+experiments. Which artifacts an experiment has to provide depends on the
+requested action, so the requirements are kept as data in
+``ACTION_REQUIREMENTS`` and the same markers drive experiment discovery.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +28,11 @@ class Requirement:
             return f'<experiment>/{self.path}'
         return f'<experiment>/{self.path}/'
 
+    @property
+    def summary(self) -> str:
+        """Human readable phrase used in error messages."""
+        return self.description
+
     def is_satisfied_by(self, experiment: Path) -> bool:
         target = experiment / self.path
         return target.is_file() if self.must_be_file else target.is_dir()
@@ -34,6 +44,13 @@ ANALYSIS_INPUT = Requirement('coinjoin_tx_info.json', must_be_file=True)
 
 # Any of these makes a subfolder recognizable as an experiment.
 EXPERIMENT_MARKERS = (DOCKER_DATA, WALLET_WASABI, ANALYSIS_INPUT)
+
+DEFAULT_ACTION = 'collect_docker'
+ACTION_REQUIREMENTS = {
+    'collect_local': (WALLET_WASABI,),
+    'collect_docker': (DOCKER_DATA,),
+    'analyze_only': (ANALYSIS_INPUT,),
+}
 
 
 def is_experiment(path: Path) -> bool:
@@ -73,9 +90,19 @@ def collect_experiments(target_paths):
     return experiments
 
 
-def validate_emulation_target(target_path: str) -> str:
-    try:
-        collect_experiments([target_path])
-    except EmulationTargetError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-    return target_path
+def verify_requirement(experiments, action: str, requirement: Requirement):
+    """Fail when any experiment lacks the artifact demanded by the action."""
+    missing = [str(experiment) for experiment in experiments
+               if not requirement.is_satisfied_by(experiment)]
+    if missing:
+        raise EmulationTargetError(
+            f'{action} requires {requirement.summary}; missing for: ' + ', '.join(missing)
+        )
+
+
+def validate_emulation_targets(target_paths, action):
+    """Validate all target paths against the requirements of the requested action."""
+    effective_action = action or DEFAULT_ACTION
+    experiments = collect_experiments(target_paths)
+    for requirement in ACTION_REQUIREMENTS[effective_action]:
+        verify_requirement(experiments, effective_action, requirement)
