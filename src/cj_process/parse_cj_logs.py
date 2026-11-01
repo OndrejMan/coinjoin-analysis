@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
+from cj_process.emulation_targets import validate_emulation_target
 from cj_process.joinmarket_client import (
     find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
@@ -32,7 +33,6 @@ from enum import Enum
 from cProfile import Profile
 from pstats import SortKey, Stats
 from decimal import Decimal
-from pathlib import Path
 import jsonpickle
 from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
@@ -3179,32 +3179,6 @@ def backup_log_files(target_path: str):
         shutil.copy(os.path.join(log_file_path), os.path.join(target_path, f'{file_name}.{random.randint(10000, 99999)}.txt'))
     else:
         logging.warning(f'Log file {log_file_path} does not found, not copied.')
-
-
-def validate_emulation_target(target_path: str) -> str:
-    path = Path(target_path)
-    if not path.is_dir():
-        raise argparse.ArgumentTypeError(
-            f"EmuCoinJoin output path does not exist: {target_path}"
-        )
-
-    try:
-        has_experiment = any(
-            experiment.is_dir() and (experiment / "data").is_dir()
-            for experiment in path.iterdir()
-        )
-    except OSError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Cannot inspect EmuCoinJoin output path {target_path}: {exc}"
-        ) from exc
-
-    if not has_experiment:
-        raise argparse.ArgumentTypeError(
-            f"No EmuCoinJoin experiments found under {target_path}; "
-            f"expected {target_path}/<experiment>/data/"
-        )
-
-    return target_path
 
 
 def parse_arguments(argv):
