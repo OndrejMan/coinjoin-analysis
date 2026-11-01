@@ -9,6 +9,8 @@ import os
 
 import cj_process.cj_analysis as als
 
+logger = logging.getLogger(__name__)
+
 
 def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
     """
@@ -20,7 +22,7 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     # Resolved at call time so tests can patch ``parse_cj_logs`` attributes; see module docstring.
     from cj_process import parse_cj_logs
 
-    print('Parsing coinjoin-relevant data from joinmarket client logs {}...'.format(base_path), end='')
+    print(f'Parsing coinjoin-relevant data from JoinMarket client logs {base_path}...', end='')
     # 1. Parse logs for each client separately
     # 2. Collate client logs into complete view
 
@@ -40,8 +42,10 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     all_coinjoins_duplicities = [success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()]
     all_coinjoins = {txid: success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()}
 
-    parse_cj_logs.SM.print('Total joinmarket coinjoins detected (with duplicities: {}'.format(len(all_coinjoins_duplicities)))
-    parse_cj_logs.SM.print('Total fully finished joinmarket coinjoins found: {}'.format(len(all_coinjoins)))
+    parse_cj_logs.SM.print(
+        f'Total JoinMarket coinjoins detected (with duplicities: {len(all_coinjoins_duplicities)})'
+    )
+    parse_cj_logs.SM.print(f'Total fully finished JoinMarket coinjoins found: {len(all_coinjoins)}')
     print('Parsing separate coinjoin transactions ', end='')
     cjtx_stats = {}
     for cjtxid in all_coinjoins.keys():
@@ -55,10 +59,10 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
             tx_record['is_cjtx'] = True
             cjtx_stats[cjtxid] = tx_record
         else:
-            print('ERROR: decoding transaction for tx={}'.format(cjtxid))
+            logger.warning('Could not decode JoinMarket CoinJoin transaction tx=%s', cjtxid)
         print('.', end='')
     print('done')
 
-    parse_cj_logs.SM.print('Total fully finished coinjoins processed: {}'.format(len(cjtx_stats.keys())))
+    parse_cj_logs.SM.print(f'Total fully finished JoinMarket coinjoins processed: {len(cjtx_stats)}')
 
     return cjtx_stats
