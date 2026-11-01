@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
-from cj_process.emulation_targets import validate_emulation_target
+from cj_process.emulation_targets import find_emulation_experiments, validate_emulation_target
 from cj_process.joinmarket_client import (
     find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
@@ -33,6 +33,7 @@ from enum import Enum
 from cProfile import Profile
 from pstats import SortKey, Stats
 from decimal import Decimal
+from pathlib import Path
 import jsonpickle
 from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
@@ -2809,22 +2810,11 @@ def get_experiments_base_paths(base_path: str):
     :param base_path: base folder with experiments as subfolders
     :return: list of folders which cointain recognized experiments
     """
-    files = []
-    if os.path.exists(base_path):
-        files = os.listdir(base_path)
-    else:
+    if not os.path.exists(base_path):
         print('Path {} does not exists'.format(base_path))
+        return []
 
-    # Search all paths to be processed
-    paths_to_process = []
-    for file in files:
-        target_exp_base_path = os.path.join(base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if (os.path.exists(os.path.join(target_exp_base_path, 'WalletWasabi'))
-                    or os.path.exists(os.path.join(target_exp_base_path, 'data'))):
-                paths_to_process.append(target_exp_base_path)
-
-    return paths_to_process
+    return [str(experiment) for experiment in find_emulation_experiments(Path(base_path))]
 
 
 def process_multiple_experiments(base_path: str, save_figs=False, num_threads=-1):
