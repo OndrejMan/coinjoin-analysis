@@ -13,6 +13,7 @@ import matplotlib
 from cj_process.cj_structs import SummaryMessages
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_file,
+    find_wasabi_coordinator_log_files,
     find_wasabi_prison_file,
 )
 
@@ -1859,7 +1860,7 @@ def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}):
     regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Blame Round \((?P<round_id>.*)\): Blame round created from round '(?P<orig_round_id>.*)'?"
     start_blame_rounds_id = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp'])
     # 2023-10-07 11:04:56.723 [43] INFO	Arena.StepTransactionSigningPhaseAsync (374)	Round (dee277ed8fd5d1af24bf09126818b3cec362f52f9fc4323474c2ec5075454d1a): Successfully broadcast the coinjoin: 345386611e7a4543524a3c7fa27f14d511fbb70b1b8786d777b19fb265e95558.
-    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]*)\.?"
+    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]{64})\.?"
     success_coinjoin_round_ids = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp', 'cj_tx_id'])
     # round_cjtx_mapping = find_round_cjtx_mapping(coord_input_file, regex_pattern, 'round_id', 'cj_tx_id')
     round_cjtx_mapping = {round_id: success_coinjoin_round_ids[round_id][0]['cj_tx_id'] for round_id in     # take only the first record found
@@ -1926,7 +1927,7 @@ def parse_coinjoin_errors(cjtx_stats, coord_input_file):
     # Round-dependent information
     #
     # Round id to coinjoin txid mapping
-    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]*)\.?"
+    regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Successfully broadcast the coinjoin: (?P<cj_tx_id>[0-9a-f]{64})\.?"
     success_coinjoin_round_ids = als.find_round_ids(coord_input_file, regex_pattern, ['round_id', 'timestamp', 'cj_tx_id'])
     als.insert_type(success_coinjoin_round_ids, CJ_LOG_TYPES.COINJOIN_BROADCASTED)
     als.insert_by_round_id(rounds_logs, success_coinjoin_round_ids)
@@ -2594,8 +2595,8 @@ def process_experiment(args):
 
         # Parse conjoins from logs
         # Case 1: Local or exported Wasabi coordinator logs
-        coordinator_log_file = find_wasabi_coordinator_log_file(WASABIWALLET_DATA_DIR)
-        if coordinator_log_file is not None:
+        coordinator_log_files = find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR)
+        for coordinator_log_file in coordinator_log_files:
             cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coordinator_log_file, RAW_TXS_DB)
         # Case 2: Docker with joinmarket client
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
@@ -2612,8 +2613,9 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path) and coordinator_log_file is not None:
-            parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
+        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
+            for coordinator_log_file in coordinator_log_files:
+                parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:
