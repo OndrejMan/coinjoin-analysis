@@ -2545,11 +2545,11 @@ def optimize_txvalue_info(cjtx_stats):
             for input in cjtx_stats['coinjoins'][txid]['inputs'].keys():
                 assert type(cjtx_stats['coinjoins'][txid]['inputs'][input]['value']) is float, 'non-float value'
                 cjtx_stats['coinjoins'][txid]['inputs'][input]['value'] \
-                    = int(cjtx_stats['coinjoins'][txid]['inputs'][input]['value'] * SATS_IN_BTC)
+                    = als.btc_to_sats(cjtx_stats['coinjoins'][txid]['inputs'][input]['value'])
             for output in cjtx_stats['coinjoins'][txid]['outputs'].keys():
                 assert type(cjtx_stats['coinjoins'][txid]['outputs'][output]['value']) is float, 'non-float value'
                 cjtx_stats['coinjoins'][txid]['outputs'][output]['value'] \
-                    = int(cjtx_stats['coinjoins'][txid]['outputs'][output]['value'] * SATS_IN_BTC)
+                    = als.btc_to_sats(cjtx_stats['coinjoins'][txid]['outputs'][output]['value'])
 
     return optimized
 
