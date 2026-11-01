@@ -1,15 +1,37 @@
-"""Parse the JoinMarket client logs of a run into CoinJoin records.
+"""Locate the JoinMarket artifacts of a run and parse the CoinJoins they describe.
 
-``parse_cj_logs`` is imported lazily inside the function that needs it: it
-imports this module at module level, and the references (extract_tx_info, SM)
-must be resolved at call time so tests can patch ``parse_cj_logs`` attributes.
+CoinJoin transaction IDs come from the exported jcs-*/joinmarket/jmwalletd.log
+files.
+
+``parse_cj_logs`` is imported lazily inside the functions that need it: it
+imports this module at module level, and the references (extract_tx_info,
+SM) must be resolved at call time so tests can patch
+``parse_cj_logs`` attributes.
 """
+import glob
 import logging
 import os
 
 import cj_process.cj_analysis as als
 
 logger = logging.getLogger(__name__)
+
+
+def find_joinmarket_round_events_file(base_path: str):
+    """Recognize JoinMarket exports by the presence of their round-event file."""
+    candidate_paths = [
+        os.path.join(base_path, 'data', 'joinmarket_round_events.json'),
+        os.path.join(base_path, 'joinmarket_round_events.json'),
+    ]
+    for candidate_path in candidate_paths:
+        if os.path.isfile(candidate_path):
+            return candidate_path
+    return None
+
+
+def find_joinmarket_client_log_files(base_path: str):
+    pattern = os.path.join(base_path, 'data', 'jcs-*', 'joinmarket', 'jmwalletd.log')
+    return sorted(path for path in glob.glob(pattern) if os.path.isfile(path))
 
 
 def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_rpc: bool = True):
@@ -26,18 +48,9 @@ def joinmarket_parse_coinjoin_logs(base_path: str, raw_tx_db: dict = {}, allow_r
     # 1. Parse logs for each client separately
     # 2. Collate client logs into complete view
 
-    clients_paths = []
-    exp_base_path = os.path.join(base_path, 'data')
-    files = os.listdir(exp_base_path) if os.path.exists(exp_base_path) else logging.error(f'Path {exp_base_path} does not exist')
-    for file in files:
-        target_exp_base_path = os.path.join(exp_base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if os.path.exists(os.path.join(target_exp_base_path, 'joinmarket')):
-                clients_paths.append(target_exp_base_path)
-
     success_coinjoins = {}
-    for client_path in clients_paths:
-        success_coinjoins[client_path] = als.joinmarket_find_coinjoins(os.path.join(client_path, 'joinmarket', 'jmwalletd.log'))
+    for log_file in find_joinmarket_client_log_files(base_path):
+        success_coinjoins[log_file] = als.joinmarket_find_coinjoins(log_file)
 
     all_coinjoins_duplicities = [success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()]
     all_coinjoins = {txid: success_coinjoins[path][txid] for path in success_coinjoins.keys() for txid in success_coinjoins[path].keys()}

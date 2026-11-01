@@ -11,7 +11,11 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
-from cj_process.joinmarket_client import joinmarket_parse_coinjoin_logs
+from cj_process.joinmarket_client import (
+    find_joinmarket_client_log_files,
+    find_joinmarket_round_events_file,
+    joinmarket_parse_coinjoin_logs,
+)
 from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_file,
     find_wasabi_coordinator_log_files,
@@ -2605,6 +2609,12 @@ def process_experiment(args):
     base_path = args[0]
     save_figs = args[1]
     WASABIWALLET_DATA_DIR = base_path
+    is_joinmarket = bool(
+        find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR)
+        or find_joinmarket_round_events_file(WASABIWALLET_DATA_DIR)
+    )
+    if is_joinmarket:
+        mix_protocol = MIX_PROTOCOL.JOINMARKET
     SM.print(f'INPUT PATH: {base_path}')
     save_file = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info.json")
     save_file_stats = os.path.join(WASABIWALLET_DATA_DIR, "coinjoin_tx_info_stats.json")
@@ -2641,12 +2651,15 @@ def process_experiment(args):
 
         # Parse conjoins from logs
         coinjoin_log_files = []
-        joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
-        if os.path.exists(joinmarket_input_path):
+        if is_joinmarket:
+            if not find_joinmarket_client_log_files(WASABIWALLET_DATA_DIR):
+                raise ValueError(
+                    'JoinMarket analysis requires exported data/jcs-*/joinmarket/jmwalletd.log files; '
+                    'round events are ground truth, not an analyzer input'
+                )
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(
                 WASABIWALLET_DATA_DIR, RAW_TXS_DB, allow_rpc=allow_rpc
             )
-            # Wasabi error parsing is skipped below, but the analysis still reads the rounds.
             cjtx_stats['rounds'] = {'no_round': []}
         else:
             cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
@@ -2663,7 +2676,7 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if not os.path.exists(joinmarket_input_path):
+        if not is_joinmarket:
             if op.PARSE_ERRORS and coinjoin_log_files:
                 for coinjoin_log_file in coinjoin_log_files:
                     parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
@@ -2723,7 +2736,8 @@ def process_experiment(args):
     #parse_client_coinjoin_logs(cjtx_stats, client_input_path)
     # TODO: load client logs from multiple directories 'wasabi-client-x'
 
-    load_prison_data(cjtx_stats, WASABIWALLET_DATA_DIR)
+    if not is_joinmarket:
+        load_prison_data(cjtx_stats, WASABIWALLET_DATA_DIR)
 
     load_anonscore_data(cjtx_stats, WASABIWALLET_DATA_DIR)
 
