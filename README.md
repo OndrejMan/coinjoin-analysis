@@ -20,6 +20,27 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
+### Wallet Wasabi data directory (optional)
+
+Set `WASABI_WALLET_DATA_DIR` to the Wallet Wasabi data directory when the RPC
+helpers should load `Client/Config.json` from that installation:
+
+```
+export WASABI_WALLET_DATA_DIR=/path/to/WalletWasabi
+```
+
+### Bitcoin Core CLI (optional)
+
+The raw-transaction decoding workflow invokes `bitcoin-cli` from `PATH` by
+default. Set `BITCOIN_CLI_PATH` when the executable is installed elsewhere:
+
+```
+export BITCOIN_CLI_PATH=/opt/bitcoin/bin/bitcoin-cli
+```
+
+The `collect_docker` workflow reads already decoded `data/btc-node/block_*.json`
+files and does not require `bitcoin-cli`.
+
 ### Tests
 
 Install the test dependencies (including the runtime requirements and pytest):
@@ -172,6 +193,15 @@ To extract all executed coinjoins into a unified json format and perform analysi
 ```
 parse_cj_logs.py --action collect_docker --target-path path_to_experiments
 ```
+
+The same operation is available in the supplied Docker Compose service. Put
+experiments under `runs/emulation/logs/` and run:
+
+```
+docker compose run --rm emulation-process
+```
+
+Set `CJ_RUNS` to mount a different host-side `runs/` directory.
 
 The extraction process creates the following files: 
   * ```coinjoin_tx_info.json``` ... basic information about all detected coinjoins, mapping of all wallets to their coins, started rounds, etc.. Used for subsequent analysis.
