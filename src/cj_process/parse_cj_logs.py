@@ -11,6 +11,11 @@ import numpy as np
 import matplotlib
 
 from cj_process.cj_structs import SummaryMessages
+from cj_process.emulation_targets import (
+    EmulationTargetError,
+    find_emulation_experiments,
+    validate_emulation_targets,
+)
 from cj_process.joinmarket_client import (
     find_joinmarket_client_log_files,
     find_joinmarket_round_events_file,
@@ -32,6 +37,7 @@ from enum import Enum
 from cProfile import Profile
 from pstats import SortKey, Stats
 from decimal import Decimal
+from pathlib import Path
 import jsonpickle
 from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
@@ -2808,22 +2814,11 @@ def get_experiments_base_paths(base_path: str):
     :param base_path: base folder with experiments as subfolders
     :return: list of folders which cointain recognized experiments
     """
-    files = []
-    if os.path.exists(base_path):
-        files = os.listdir(base_path)
-    else:
+    if not os.path.exists(base_path):
         print('Path {} does not exists'.format(base_path))
+        return []
 
-    # Search all paths to be processed
-    paths_to_process = []
-    for file in files:
-        target_exp_base_path = os.path.join(base_path, file)
-        if os.path.isdir(target_exp_base_path):
-            if (os.path.exists(os.path.join(target_exp_base_path, 'WalletWasabi'))
-                    or os.path.exists(os.path.join(target_exp_base_path, 'data'))):
-                paths_to_process.append(target_exp_base_path)
-
-    return paths_to_process
+    return [str(experiment) for experiment in find_emulation_experiments(Path(base_path))]
 
 
 def process_multiple_experiments(base_path: str, save_figs=False, num_threads=-1):
@@ -3180,7 +3175,7 @@ def backup_log_files(target_path: str):
         logging.warning(f'Log file {log_file_path} does not found, not copied.')
 
 
-def parse_arguments(argv):
+def parse_arguments(argv, options=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action",
                         help="Action to performed. collect_local...from running instances; "
@@ -3201,7 +3196,22 @@ def parse_arguments(argv):
                         action="store", metavar="ENV_VARS",
                         required=False)
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if options is None:
+        options = EmulParseOptions()
+    options.set_args(args)
+    if options.target_path:
+        if options.LOAD_TXINFO_FROM_FILE:
+            effective_action = 'analyze_only'
+        elif options.LOAD_TXINFO_FROM_DOCKER_FILES:
+            effective_action = 'collect_docker'
+        else:
+            effective_action = 'collect_local'
+        try:
+            validate_emulation_targets(options.target_path, effective_action)
+        except EmulationTargetError as exc:
+            parser.error(str(exc))
+    return args
 
 
 class AnalysisType(Enum):
@@ -3429,8 +3439,7 @@ def main(argv=None):
     global op
     op = EmulParseOptions()
     # parse arguments, overwrite default settings if required
-    args = parse_arguments(argv)
-    op.set_args(args)
+    parse_arguments(argv, op)
 
     #
     # Analysis of single experiment
