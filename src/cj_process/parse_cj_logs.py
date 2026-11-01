@@ -15,6 +15,7 @@ from cj_process.wasabi_coordinator import (
     find_wasabi_coordinator_log_file,
     find_wasabi_coordinator_log_files,
     find_wasabi_prison_file,
+    parse_wasabi_coordinator_coinjoins,
 )
 
 matplotlib.use('Agg')
@@ -657,6 +658,12 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
     if 'analysis' not in cjtx_stats.keys():
         cjtx_stats['analysis'] = {}
     cjtx_stats['analysis']['path'] = base_path
+
+    if len(coinjoins) == 0:
+        SM.print('No coinjoin transactions found for this experiment.')
+        analysis_stats['num_coinjoins'] = 0
+        analysis_stats['wallets_participation'] = {}
+        return analysis_stats
 
     # Compute same output size statistics
     for cjtx in coinjoins.keys():
@@ -1682,6 +1689,31 @@ def weighted_wallets_participating(fig, multi_cjtx_stats: dict, dataset_name: st
     fig.set_title(graph_title)
 
 
+def filter_experiments_for_aggregated_plots(multi_cjtx_stats: dict) -> dict:
+    required_analysis_keys = {
+        'wallets_no_input_mixed',
+        'wallets_anonscore_histogram_avg',
+        'coinjoin_number_different_wallets',
+        'coinjoins_finished_all',
+        'utxos_in_prison',
+        'wallets_times_used_as_input',
+        'coinjoin_number_inputs_in_time',
+        'coinjoin_number_outputs_in_time',
+        'coinjoin_utxos_entropy_in_time',
+    }
+    analyzable_stats = {
+        experiment: stats
+        for experiment, stats in multi_cjtx_stats.items()
+        if stats.get('coinjoins') and required_analysis_keys.issubset(stats.get('analysis', {}).keys())
+    }
+    skipped_stats = set(multi_cjtx_stats.keys()) - set(analyzable_stats.keys())
+    for experiment in sorted(skipped_stats):
+        logging.info(f"Skipping aggregated coinjoin plots for {experiment}; no coinjoin-derived analysis datasets are available.")
+    if not analyzable_stats:
+        logging.info("No experiments with coinjoin-derived analysis datasets; skipping aggregated coinjoin statistics plots.")
+    return analyzable_stats
+
+
 def analyze_aggregated_coinjoin_stats(multi_cjtx_stats, base_path):
     """
     Analyze and visualize aggregated coinjoin transactions statistics
@@ -1691,6 +1723,10 @@ def analyze_aggregated_coinjoin_stats(multi_cjtx_stats, base_path):
     """
 
     print("Starting analyze_aggregated_coinjoin_stats() analysis")
+
+    analyzable_stats = filter_experiments_for_aggregated_plots(multi_cjtx_stats)
+    if not analyzable_stats:
+        return
 
     # Create four subplots with their own axes
     fig = plt.figure(figsize=(48, 24))
@@ -1713,12 +1749,12 @@ def analyze_aggregated_coinjoin_stats(multi_cjtx_stats, base_path):
     # Weighted results computations FUNCT[item[0] * item[1] for item in data]
     #
     # Average anonscore for different base parameter (number of wallets participating)
-    visualize_scatter_num_wallets_weighted(ax1, multi_cjtx_stats, 'wallets_anonscore_histogram_avg', np.median,
+    visualize_scatter_num_wallets_weighted(ax1, analyzable_stats, 'wallets_anonscore_histogram_avg', np.median,
                                            False, 'Number of wallets in mix', 'Median anonscore',
                                   f"Dependency of {'wallets_anonscore_histogram_avg'} on number of wallets")
 
     # DONE: Histogram of number of wallets participating in coinjoins (normalized)
-    weighted_wallets_participating(ax4, multi_cjtx_stats, 'coinjoin_number_different_wallets', sum,
+    weighted_wallets_participating(ax4, analyzable_stats, 'coinjoin_number_different_wallets', sum,
                                            True, 'Number of wallets in mix', 'Fraction of different wallets in coinjoins',
                                            f"Dependency of {'coinjoin_number_different_wallets'} on number of wallets")
 
@@ -1728,32 +1764,32 @@ def analyze_aggregated_coinjoin_stats(multi_cjtx_stats, base_path):
     #
 
     # DONE: Number of coinjoins finished for different base parameter (number of wallets participating)
-    visualize_scatter_num_wallets(ax2, multi_cjtx_stats, 'coinjoins_finished_all',
+    visualize_scatter_num_wallets(ax2, analyzable_stats, 'coinjoins_finished_all',
                                   1, sum, False, False, 'Number of wallets in mix', 'Number of coinjoins',
                                   f"Dependency of {'coinjoins_finished_all'} on number of wallets")
 
     # DONE: Number of utxos in prison
-    visualize_scatter_num_wallets(ax3, multi_cjtx_stats, 'utxos_in_prison',
+    visualize_scatter_num_wallets(ax3, analyzable_stats, 'utxos_in_prison',
                                   1, sum, False, False, 'Number of wallets in mix', 'Number of utxos in prison',
                                   f"Dependency of {'utxos_in_prison'} on number of wallets")
 
     # Median frequency a wallet was used in mix
-    visualize_scatter_num_wallets(ax5, multi_cjtx_stats, 'wallets_times_used_as_input',
+    visualize_scatter_num_wallets(ax5, analyzable_stats, 'wallets_times_used_as_input',
                                   1, np.median, True, True, 'Number of wallets in mix', 'Fraction of participation',
                                   f"Dependency of {'wallets_times_used_as_input'} on number of wallets")
 
     # Average number of inputs into cjtxs
-    visualize_scatter_num_wallets(ax6, multi_cjtx_stats, 'coinjoin_number_inputs_in_time',
+    visualize_scatter_num_wallets(ax6, analyzable_stats, 'coinjoin_number_inputs_in_time',
                                   1, sum, True, False, 'Number of wallets in mix', 'Number of inputs of cjtx',
                                   f"Dependency of {'coinjoin_number_inputs_in_time'} (average number of inputs) on number of wallets")
 
     # Average number of outputs into cjtxs
-    visualize_scatter_num_wallets(ax7, multi_cjtx_stats, 'coinjoin_number_outputs_in_time',
+    visualize_scatter_num_wallets(ax7, analyzable_stats, 'coinjoin_number_outputs_in_time',
                                   1, sum, True, False, 'Number of wallets in mix', 'Number of outputs of cjtx',
                                   f"Dependency of {'coinjoin_number_outputs_in_time'} (average number of outputs) on number of wallets")
 
     # Average entropy of coinjoins
-    visualize_scatter_num_wallets(ax8, multi_cjtx_stats, 'coinjoin_utxos_entropy_in_time',
+    visualize_scatter_num_wallets(ax8, analyzable_stats, 'coinjoin_utxos_entropy_in_time',
                                   1, sum, True, False, 'Number of wallets in mix', 'Entropy',
                                   f"Dependency of {'coinjoin_utxos_entropy_in_time'} (average entropy of coinjoin round) on number of wallets")
 
@@ -2013,13 +2049,15 @@ def parse_coinjoin_errors(cjtx_stats, coord_input_file):
     regex_pattern = r"(?P<timestamp>.*) .* WARNING.*WabiSabiProtocolException: Input banned.?"
     input_banned = als.find_round_ids(coord_input_file, regex_pattern, ['timestamp'])
     als.insert_type(input_banned, CJ_LOG_TYPES.INPUT_BANNED)
-    rounds_logs['no_round'].append(input_banned)
+    if input_banned:
+        rounds_logs['no_round'].append(input_banned)
 
     # NOT_ENOUGH_FUNDS 2023-09-02 10:18:48.814 [47] WARNING	IdempotencyRequestCache.GetCachedResponseAsync (79)	WalletWasabi.WabiSabi.Backend.Models.WabiSabiProtocolException: Not enough funds
     regex_pattern = r"(?P<timestamp>.*) .* WARNING.*WabiSabiProtocolException: Not enough funds.?"
     not_enough_funds = als.find_round_ids(coord_input_file, regex_pattern, ['timestamp'])
     als.insert_type(not_enough_funds, CJ_LOG_TYPES.NOT_ENOUGH_FUNDS)
-    rounds_logs['no_round'].append(not_enough_funds)
+    if not_enough_funds:
+        rounds_logs['no_round'].append(not_enough_funds)
 
     if 'rounds' not in cjtx_stats.keys():
         cjtx_stats['rounds'] = {}
@@ -2418,7 +2456,9 @@ def load_prison_data(cjtx_stats, base_path):
                 else:
                     print('Unknown prison reason {}'.format(prison_log['reason']))
 
-                cjtx_stats['rounds'][prison_log['round_id']]['logs'].append(prison_log)
+                # Prison records can reference rounds the coordinator log never completed,
+                # so the round record is created on demand instead of assumed to exist.
+                als.insert_by_round_id(cjtx_stats.setdefault('rounds', {}), {prison_log['round_id']: [prison_log]})
                 items_in_prison += 1
 
         SM.print('Total {} records found in prison'.format(items_in_prison))
@@ -2594,16 +2634,18 @@ def process_experiment(args):
             obtain_wallets_info(WASABIWALLET_DATA_DIR, op.LOAD_WALLETS_INFO_VIA_RPC, op.LOAD_TXINFO_FROM_DOCKER_FILES, RAW_TXS_DB))
 
         # Parse conjoins from logs
-        # Case 1: Local or exported Wasabi coordinator logs
-        coordinator_log_files = find_wasabi_coordinator_log_files(WASABIWALLET_DATA_DIR)
-        for coordinator_log_file in coordinator_log_files:
-            cjtx_stats['coinjoins'] = parse_backend_coinjoin_logs(coordinator_log_file, RAW_TXS_DB)
-        # Case 2: Docker with joinmarket client
+        coinjoin_log_files = []
         joinmarket_input_path = os.path.join(WASABIWALLET_DATA_DIR, 'data', 'jcs-000', 'joinmarket')
         if os.path.exists(joinmarket_input_path):
             cjtx_stats['coinjoins'] = joinmarket_parse_coinjoin_logs(WASABIWALLET_DATA_DIR, RAW_TXS_DB)
             # Wasabi error parsing is skipped below, but the analysis still reads the rounds.
             cjtx_stats['rounds'] = {'no_round': []}
+        else:
+            cjtx_stats['coinjoins'], coinjoin_log_files = parse_wasabi_coordinator_coinjoins(
+                WASABIWALLET_DATA_DIR, RAW_TXS_DB
+            )
+            if not coinjoin_log_files:
+                cjtx_stats['rounds'] = {'no_round': []}
 
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
@@ -2613,9 +2655,16 @@ def process_experiment(args):
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
 
         # Analyze error states
-        if op.PARSE_ERRORS and not os.path.exists(joinmarket_input_path):
-            for coordinator_log_file in coordinator_log_files:
-                parse_coinjoin_errors(cjtx_stats, coordinator_log_file)
+        if not os.path.exists(joinmarket_input_path):
+            if op.PARSE_ERRORS and coinjoin_log_files:
+                for coinjoin_log_file in coinjoin_log_files:
+                    parse_coinjoin_errors(cjtx_stats, coinjoin_log_file)
+            elif op.PARSE_ERRORS:
+                if 'rounds' not in cjtx_stats:
+                    cjtx_stats['rounds'] = {'no_round': []}
+                logging.info(
+                    'Skipping Wasabi coordinator error parsing; no completed CoinJoin rounds were found.'
+                )
 
         # Save parsed coinjoin transactions info into json
         if not op.READ_ONLY_COINJOIN_TX_INFO:

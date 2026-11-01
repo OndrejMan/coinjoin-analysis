@@ -19,3 +19,19 @@ def test_wasabi_source_selection_leaves_manifest_validation_to_pipeline(tmp_path
     write_manifest(tmp_path, path, complete=False, positive_count=99)
     path.write_text('modified coordinator log\n', encoding='utf-8')
     assert parse_cj_logs.find_wasabi_coordinator_log_files(str(tmp_path)) == [str(path)]
+
+
+def test_wasabi_parsing_merges_all_declared_sources(tmp_path):
+    from unittest import mock
+    from cj_process.wasabi_coordinator import parse_wasabi_coordinator_coinjoins
+
+    first = tmp_path / 'data' / 'first' / 'Logs.txt'
+    second = tmp_path / 'data' / 'second' / 'Logs.txt'
+    for path in (first, second):
+        path.parent.mkdir(parents=True)
+        path.write_text('coordinator log\n', encoding='utf-8')
+    write_manifest(tmp_path, first, additional_log_paths=(second,))
+    with mock.patch.object(parse_cj_logs, 'parse_backend_coinjoin_logs', side_effect=[{'txA': {}}, {'txB': {}}]):
+        coinjoins, logs = parse_wasabi_coordinator_coinjoins(str(tmp_path), {})
+    assert coinjoins == {'txA': {}, 'txB': {}}
+    assert logs == [str(first), str(second)]

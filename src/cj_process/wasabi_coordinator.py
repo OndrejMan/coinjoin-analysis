@@ -34,3 +34,16 @@ def find_wasabi_prison_file(base_path: str) -> str | None:
         if os.path.isfile(prison_file):
             return prison_file
     return None
+
+
+def parse_wasabi_coordinator_coinjoins(base_path, raw_txs):
+    """Parse CoinJoins from the run's coordinator log sources."""
+    from cj_process import parse_cj_logs
+
+    log_files = find_wasabi_coordinator_log_files(base_path)
+    if not log_files:
+        raise FileNotFoundError(f'No Wasabi coordinator log found in {base_path}')
+    coinjoins = {}
+    for log_file in log_files:
+        coinjoins.update(parse_cj_logs.parse_backend_coinjoin_logs(log_file, raw_txs))
+    return coinjoins, log_files
