@@ -9,15 +9,14 @@ git clone https://github.com/crocs-muni/coinjoin-analysis.git
 cd coinjoin-analysis
 ```
 
-Optional: make Python virtual environment
+Install [uv](https://docs.astral.sh/uv/) and create the locked environment in `.venv`:
 ```
-python3 -m venv venv
-source venv/bin/activate
+uv sync
 ```
 
-Install requirements:
+Run the commands below with `uv run`, or activate the environment first:
 ```
-pip install -r requirements.txt
+source .venv/bin/activate
 ```
 
 ### Wallet Wasabi data directory (optional)
@@ -43,10 +42,9 @@ The `collect_docker` workflow recursively reads already decoded
 
 ### Tests
 
-Install the test dependencies (including the runtime requirements and pytest):
+`uv sync` also installs the test dependencies:
 ```
-python -m pip install -r requirements-dev.txt
-PYTHONPATH=src python -m pytest tests
+uv run python -m pytest tests
 ```
 
 
