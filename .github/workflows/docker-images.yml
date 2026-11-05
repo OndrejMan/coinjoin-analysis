@@ -9,8 +9,8 @@ on:
       - "src/**"
       - "data/**"
       - "docker/**"
-      - "requirements.txt"
-      - "setup.py"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".dockerignore"
       - ".github/workflows/docker-images.yml"
 
