@@ -21,6 +21,12 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        version: '0.12.1'
+        enable-cache: true
+
     - name: Install Graphviz on GitHub-hosted runner
       if: ${{ runner.environment == 'github-hosted' }}
       run: sudo apt-get update && sudo apt-get install -y graphviz
@@ -36,12 +42,8 @@ jobs:
 
     - name: Set up test environment
       shell: bash
-      run: |
-        python -m venv .venv
-        .venv/bin/python -m pip install --upgrade pip
-        .venv/bin/python -m pip install -r requirements-dev.txt
-        .venv/bin/python -m pip install -e .
+      run: uv sync --locked
 
     - name: Run tests
       shell: bash
-      run: .venv/bin/python -m pytest
+      run: uv run --locked python -m pytest
