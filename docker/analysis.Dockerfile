@@ -1,3 +1,6 @@
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.1
+FROM ${UV_IMAGE} AS uv
+
 FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -5,7 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg \
     PYTHONPATH=/opt/coinjoin-analysis/src \
-    PIP_NO_CACHE_DIR=1
+    UV_NO_CACHE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/usr/local
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -22,12 +27,13 @@ RUN apt-get update \
 
 WORKDIR /opt/coinjoin-analysis
 
-COPY requirements.txt setup.py ./
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install -r requirements.txt
+COPY --from=uv /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --inexact --no-install-project
 
 COPY . .
-RUN python -m pip install --no-deps -e . \
+RUN uv sync --locked --no-dev --inexact \
     && chmod +x /opt/coinjoin-analysis/docker/analysis-entrypoint.sh
 
 ENTRYPOINT ["/opt/coinjoin-analysis/docker/analysis-entrypoint.sh"]
