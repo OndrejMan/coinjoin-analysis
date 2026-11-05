@@ -114,6 +114,34 @@ def load_wallet_export(export_file: TextIO) -> Any:
             f'Wallet export {export_file.name} is empty or damaged: {error}') from error
 
 
+def parse_mine_time(mine_time):
+    """Turn any mine_time representation produced by the exporters into a UTC datetime."""
+    if isinstance(mine_time, datetime):
+        datetime_obj = mine_time
+    elif isinstance(mine_time, (int, float)):
+        return datetime.fromtimestamp(mine_time, tz=UTC)
+    elif isinstance(mine_time, str):
+        normalized_time = mine_time.strip()
+        if normalized_time.endswith('Z'):
+            normalized_time = normalized_time[:-1] + '+00:00'
+        try:
+            datetime_obj = datetime.fromisoformat(normalized_time)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported mine_time value: {mine_time!r}") from exc
+    else:
+        raise TypeError(f"Unsupported mine_time type: {type(mine_time).__name__}")
+
+    # Block times are UTC; the exports that omit the zone say nothing else. Stamping it
+    # keeps values from different exporters comparable with each other.
+    if datetime_obj.tzinfo is None:
+        return datetime_obj.replace(tzinfo=UTC)
+    return datetime_obj.astimezone(UTC)
+
+
+def format_mine_time(mine_time):
+    return parse_mine_time(mine_time).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
 def float_equals(a, b, tolerance=1e-9):
     return abs(a - b) < tolerance
 
@@ -201,7 +229,7 @@ def print_round_logs(filename, round_id):
     print('**************************************')
 
 
-def get_input_address(txid, txid_in_out, raw_txs: dict = {}, allow_rpc: bool = True):
+def get_input_address(txid, txid_in_out, raw_txs: dict, allow_rpc: bool = True):
     """
     Returns address which was used in transaction given by 'txid' as 'txid_in_out' output index
     :param txid: transaction id to read input address from
@@ -810,6 +838,8 @@ def analyze_coinjoin_stats(cjtx_stats, base_path, cjplt: CoinJoinPlots, short_ex
                     # get coin destroy time - if not used by any tx, then set to year 9999
                     coin_destroy_time = '9999-01-25 09:44:48.000' if 'destroy_time' not in coin.keys() else coin['destroy_time']
                     # Decide state of the coin in the time of current coinjoin (cjtx_creation_time) - just before cjtx was executed
+                    # Compared as strings, which only orders them because every time here is
+                    # written in the zero-padded canonical form the sentinel above also uses.
                     if coin['create_time'] < cjtx_creation_time:
                         if cjtx_creation_time <= coin_destroy_time:  # Equal is to capture case when coin was consumed by this cjtx
                             # Coin was available for mixing at coinjoin round registration time
@@ -1895,7 +1925,7 @@ def build_address_wallet_mapping(cjtx_stats):
     return address_wallet_mapping
 
 
-def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict = {}, allow_rpc: bool = True):
+def parse_backend_coinjoin_logs(coord_input_file, raw_tx_db: dict, allow_rpc: bool = True):
     print('Parsing coinjoin-relevant data from coordinator logs {}...'.format(coord_input_file), end='')
     if PRE_2_0_4_VERSION:
         regex_pattern = r"(?P<timestamp>.*) \[.+(Arena\..*) \(.*Round \((?P<round_id>.*)\): Created round with params: MaxSuggestedAmount:'([0-9\.]+)' BTC?"
@@ -2385,10 +2415,13 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
         # Create artificial record for some future time
         highest_known_mine_time_next = None
         if all_tx_db:
-            highest_known_mine_time = max([all_tx_db[txid]['mine_time'] for txid in all_tx_db.keys()])
-            datetime_obj = datetime.strptime(highest_known_mine_time, "%Y-%m-%d %H:%M:%S.%f")
-            datetime_obj = datetime_obj + timedelta(minutes=10)
-            highest_known_mine_time_next = datetime_obj.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            # Parse before comparing: the stored values are ordered as datetimes, not as
+            # the mix of strings and epoch numbers the exporters are allowed to write.
+            highest_known_mine_time = max(
+                parse_mine_time(tx['mine_time']) for tx in all_tx_db.values()
+            )
+            datetime_obj = highest_known_mine_time + timedelta(minutes=10)
+            highest_known_mine_time_next = format_mine_time(datetime_obj)
 
         def synthetic_time_for(owner, unmatched_coin):
             """Time a coin whose block is missing, refusing to guess with no blocks at all."""
@@ -2406,7 +2439,10 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
             for coin in wallets_coins_all[wallet_name]:
                 if coin['txid'] in all_tx_db.keys():
                     coin['block_hash'] = all_tx_db[coin['txid']]['hash']
-                    coin['create_time'] = all_tx_db[coin['txid']]['mine_time']
+                    # Normalized on the way in: these times are later compared as strings
+                    # and re-parsed with a fixed format, so they cannot keep whichever
+                    # representation the exporter happened to write.
+                    coin['create_time'] = format_mine_time(all_tx_db[coin['txid']]['mine_time'])
                 else:
                     # Synthetic block info in case of missing block
                     coin['block_hash'] = 'synthetic_block'
@@ -2414,7 +2450,7 @@ def obtain_wallets_info(base_path, load_wallet_info_via_rpc, load_wallet_from_do
 
                 if 'spentBy' in coin.keys():
                     if coin['spentBy'] in all_tx_db.keys():
-                        coin['destroy_time'] = all_tx_db[coin['spentBy']]['mine_time']
+                        coin['destroy_time'] = format_mine_time(all_tx_db[coin['spentBy']]['mine_time'])
                     else:
                         # Synthetic destroy time in case of missing block
                         coin['destroy_time'] = synthetic_time_for(wallet_name, coin)
