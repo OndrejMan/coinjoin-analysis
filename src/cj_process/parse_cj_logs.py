@@ -57,6 +57,7 @@ from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
 import emulation.anonymity_score as anonymity_score
 import cj_process.cj_analysis as als
+from cj_process import emulation_postmix
 from cj_process.cj_analysis import MIX_PROTOCOL
 from cj_process.cj_analysis import CJ_LOG_TYPES
 import logging
@@ -2813,6 +2814,9 @@ def process_experiment(args):
         # Build mapping between address and controlling wallet
         cjtx_stats['address_wallet_mapping'] = build_address_wallet_mapping(cjtx_stats)
 
+        # Transactions spending coinjoin outputs outside the mix (MIX_LEAVE)
+        cjtx_stats['postmix'] = emulation_postmix.build_emulation_postmix(cjtx_stats['coinjoins'], RAW_TXS_DB)
+
         # Assume coordinator for all 32B addresses
         if op.ASSUME_COORDINATOR_WALLET:
             cjtx_stats = fix_coordinator_wallet_addresses(cjtx_stats)
@@ -2901,6 +2905,7 @@ def process_experiment(args):
     als.remove_link_between_inputs_and_outputs(cjtx_stats['coinjoins'])
     als.compute_link_between_inputs_and_outputs(cjtx_stats['coinjoins'],
                                             [cjtxid for cjtxid in cjtx_stats['coinjoins'].keys()])
+    emulation_postmix.assign_emulation_spend_references(cjtx_stats['coinjoins'], cjtx_stats.get('postmix', {}))
     als.analyze_input_out_liquidity(base_path, cjtx_stats['coinjoins'], cjtx_stats.get('postmix', {}), cjtx_stats.get('premix', {}), mix_protocol)
 
     if not op.READ_ONLY_COINJOIN_TX_INFO:
