@@ -33,7 +33,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --inexact --no-install-project
 
 COPY . .
+# Singularity runs as the PBS user; copied sources may be readable only by root.
 RUN uv sync --locked --no-dev --inexact \
+    && chmod -R a+rX /opt/coinjoin-analysis \
     && chmod +x /opt/coinjoin-analysis/docker/analysis-entrypoint.sh
 
 ENTRYPOINT ["/opt/coinjoin-analysis/docker/analysis-entrypoint.sh"]
